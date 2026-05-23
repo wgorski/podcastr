@@ -30,6 +30,25 @@
 -keep class com.ryanheise.audioservice.** { *; }
 -keep class com.ryanheise.just_audio.** { *; }
 
+# audio_service builds its rich notification on androidx.media (legacy
+# MediaSessionCompat / MediaStyle). just_audio uses androidx.media3
+# (ExoPlayer) which itself loads stream renderers via reflection. R8
+# strips parts of both unless we ask it not to — and when it does, the
+# playback foreground service still starts but the notification fails
+# to render and the controls go missing.
+-keep class androidx.media.** { *; }
+-dontwarn androidx.media.**
+-keep class androidx.media3.** { *; }
+-dontwarn androidx.media3.**
+-keep class com.google.android.exoplayer2.** { *; }
+-dontwarn com.google.android.exoplayer2.**
+
+# permission_handler — used to request POST_NOTIFICATIONS on Android 13+.
+-keep class com.baseflow.permissionhandler.** { *; }
+
+# receive_sharing_intent — wires the SEND intent into Dart.
+-keep class com.kasem.receive_sharing_intent.** { *; }
+
 # --- transitive optional references R8 can't resolve ---
 # jsoup ships an alternate regex backend (re2j) that's not bundled.
 -dontwarn com.google.re2j.**

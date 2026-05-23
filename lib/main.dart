@@ -20,10 +20,10 @@ import 'widgets/mini_player.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Edge-to-edge with the OS status bar hidden; keep the gesture nav bar.
+  // Keep both system bars visible (top status bar + gesture nav bar).
   SystemChrome.setEnabledSystemUIMode(
     SystemUiMode.manual,
-    overlays: const [SystemUiOverlay.bottom],
+    overlays: const [SystemUiOverlay.top, SystemUiOverlay.bottom],
   );
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,

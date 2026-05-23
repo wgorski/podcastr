@@ -211,16 +211,25 @@ class _DownloadingMeta extends StatelessWidget {
                     valueColor:
                         const AlwaysStoppedAnimation(AuroraTheme.accent),
                   )
-                : Stack(
-                    children: [
-                      Container(color: Colors.white.withValues(alpha: 0.08)),
-                      FractionallySizedBox(
-                        widthFactor: progress!.fraction,
-                        child: const DecoratedBox(
-                          decoration: BoxDecoration(gradient: AuroraTheme.accentGradient),
+                : LayoutBuilder(
+                    builder: (context, c) => Stack(
+                      children: [
+                        SizedBox(
+                          width: c.maxWidth,
+                          height: c.maxHeight,
+                          child: ColoredBox(
+                            color: Colors.white.withValues(alpha: 0.08),
+                          ),
                         ),
-                      ),
-                    ],
+                        SizedBox(
+                          width: c.maxWidth * progress!.fraction,
+                          height: c.maxHeight,
+                          child: const DecoratedBox(
+                            decoration: BoxDecoration(gradient: AuroraTheme.accentGradient),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
           ),
         ),
