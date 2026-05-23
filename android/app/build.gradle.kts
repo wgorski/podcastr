@@ -33,6 +33,15 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // R8 is run by the Flutter Gradle plugin even when minify is off
+            // here, and it trips on optional transitive references inside
+            // NewPipe Extractor's dependencies (Rhino / jsoup / re2j).
+            // The rules in proguard-rules.pro silence those warnings and
+            // keep the reflection-heavy classes the extractor needs.
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }

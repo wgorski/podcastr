@@ -124,7 +124,6 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 - **Download is in-process.** If the app is killed during a download, it
   doesn't resume. A proper implementation would use WorkManager / a
   foreground download service.
-- **No tests.** Verification was visual + `flutter analyze`.
 - **Debug-signed.** A release-signing config still needs to be added.
 - **YouTube changes break the extractor periodically.** When that
   happens, bump `com.github.TeamNewPipe:NewPipeExtractor` in
