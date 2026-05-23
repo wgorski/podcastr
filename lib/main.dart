@@ -113,7 +113,9 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   @override
   void initState() {
     super.initState();
-    DownloadActionRouter.instance.onCancel = _cancelDownloadFromNotification;
+    DownloadActionRouter.instance
+      ..bind()
+      ..onCancel = _cancelDownloadFromNotification;
     _load();
     _wireShareIntent();
   }
@@ -173,7 +175,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   void dispose() {
     _sleepTicker?.cancel();
     _intentSub?.cancel();
-    DownloadActionRouter.instance.onCancel = null;
+    DownloadActionRouter.instance.unbind();
     _downloads.dispose();
     _audio.dispose();
     super.dispose();
@@ -268,13 +270,18 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   }
 
   Future<void> _onStartDownload(Track downloading, ResolvedVideo resolved) async {
+    // Kick off the download FIRST. start()'s synchronous prefix inserts the
+    // per-track ValueNotifier into DownloadManager._active before any await,
+    // which means the library card subscribes to a live notifier on its
+    // first build rather than the static empty one.
+    final downloadFuture = _downloads.start(downloading, resolved);
     setState(() {
       _tracks = [downloading, ..._tracks];
       _screen = _Screen.library;
       _pendingDownloadUrl = null;
     });
     await _persist();
-    await _downloads.start(downloading, resolved);
+    await downloadFuture;
   }
 
   Future<void> _onDownloadCompleted(Track ready) async {
@@ -326,6 +333,8 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
       status: TrackStatus.downloading,
       clearErrorMessage: true,
     );
+    // See _onStartDownload re: ordering.
+    final retryFuture = _downloads.resolveAndStart(downloading);
     setState(() {
       _tracks = [
         for (final t in _tracks) t.id == failed.id ? downloading : t,
@@ -333,7 +342,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
       if (_viewedTrack?.id == failed.id) _viewedTrack = downloading;
     });
     await _persist();
-    await _downloads.resolveAndStart(downloading);
+    await retryFuture;
   }
 
   @override

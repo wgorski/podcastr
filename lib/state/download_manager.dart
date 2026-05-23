@@ -19,8 +19,11 @@ class DownloadManager {
   final void Function(String trackId, String errorMessage) onFailed;
 
   final Map<String, _ActiveDownload> _active = {};
-  static final ValueNotifier<DownloadProgress?> _emptyProgress =
-      ValueNotifier<DownloadProgress?>(null);
+  // Stable per-track progress notifier — survives across attempts and is
+  // created on the first lookup. This decouples "is there a live download
+  // right now" from "is something subscribed to the progress" so the
+  // library card doesn't lose updates if it builds before start() runs.
+  final Map<String, ValueNotifier<DownloadProgress?>> _progress = {};
 
   DownloadManager({
     required this.onCompleted,
@@ -32,11 +35,14 @@ class DownloadManager {
 
   bool isActive(String trackId) => _active.containsKey(trackId);
 
-  /// A listenable that always reflects current progress for [trackId], or
-  /// emits null when the track isn't actively downloading.
-  ValueListenable<DownloadProgress?> progressFor(String trackId) {
-    return _active[trackId]?.progress ?? _emptyProgress;
-  }
+  /// A listenable that always reflects current progress for [trackId].
+  /// Returns the same instance across calls so subscribers stay attached
+  /// even if the track transitions through downloading / failed / retry.
+  ValueListenable<DownloadProgress?> progressFor(String trackId) =>
+      _notifierFor(trackId);
+
+  ValueNotifier<DownloadProgress?> _notifierFor(String trackId) =>
+      _progress.putIfAbsent(trackId, () => ValueNotifier<DownloadProgress?>(null));
 
   /// Begin streaming bytes for [track]. The track must already carry
   /// `filePath` (the destination on disk) and `status == downloading`. The
@@ -49,10 +55,13 @@ class DownloadManager {
       return;
     }
     final notificationId = _notificationIdFor(track.id);
-    final progress = ValueNotifier<DownloadProgress?>(null);
+    final progress = _notifierFor(track.id);
+    // Reset to "starting" so a previous failed attempt's last value isn't
+    // surfaced on a fresh start.
+    progress.value = null;
 
-    // Insert synchronously so progressFor() returns the live notifier before
-    // any awaits below.
+    // Insert synchronously so isActive() and the byte-stream subscription
+    // are wired before any await below.
     final entry = _ActiveDownload(
       progress: progress,
       notificationId: notificationId,
@@ -122,13 +131,17 @@ class DownloadManager {
 
   /// Remove the active download entirely (e.g., when the user deletes the
   /// row outright). Unlike [cancel], this does NOT fire [onFailed].
+  /// Also drops the cached progress notifier — the track is gone for good.
   Future<void> abort(String trackId) async {
     final entry = _active.remove(trackId);
-    if (entry == null) return;
+    if (entry == null) {
+      _progress.remove(trackId)?.dispose();
+      return;
+    }
     await entry.subscription?.cancel();
     await _notifier.cancel(entry.notificationId);
     await _deletePartial(entry.filePath);
-    entry.progress.dispose();
+    _progress.remove(trackId)?.dispose();
   }
 
   Future<void> _finalizeFailed(String trackId, String message) async {
@@ -137,8 +150,9 @@ class DownloadManager {
       await entry.subscription?.cancel();
       await _notifier.cancel(entry.notificationId);
       await _deletePartial(entry.filePath);
-      entry.progress.dispose();
     }
+    // Keep the progress notifier alive — the user may retry, and the
+    // library card may still be subscribed.
     onFailed(trackId, message);
   }
 
@@ -153,8 +167,10 @@ class DownloadManager {
   }
 
   void _cleanup(String trackId) {
-    final entry = _active.remove(trackId);
-    entry?.progress.dispose();
+    _active.remove(trackId);
+    // Track succeeded — drop the progress notifier; the library card will
+    // re-render with the ready meta row and no longer subscribes.
+    _progress.remove(trackId)?.dispose();
   }
 
   /// Deterministic per-track notification id so re-runs don't pile up.
@@ -180,9 +196,12 @@ class DownloadManager {
   void dispose() {
     for (final entry in _active.values) {
       entry.subscription?.cancel();
-      entry.progress.dispose();
     }
     _active.clear();
+    for (final n in _progress.values) {
+      n.dispose();
+    }
+    _progress.clear();
   }
 }
 

@@ -1,3 +1,6 @@
+import 'dart:isolate';
+import 'dart:ui';
+
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -29,6 +32,7 @@ class DownloadNotifier {
     await _plugin.initialize(
       init,
       onDidReceiveNotificationResponse: _onResponse,
+      onDidReceiveBackgroundNotificationResponse: _backgroundOnResponse,
     );
     final android = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
@@ -53,7 +57,7 @@ class DownloadNotifier {
     final payload = response.payload;
     if (actionId == null || payload == null) return;
     if (actionId.startsWith(cancelActionPrefix)) {
-      DownloadActionRouter.instance.onCancel?.call(payload);
+      DownloadActionRouter.deliver(payload);
     }
   }
 
@@ -137,10 +141,66 @@ class DownloadNotifier {
 }
 
 /// Routes notification-action callbacks (currently only "Cancel") back to a
-/// single in-app handler. The owning state registers [onCancel] on startup;
-/// the [DownloadNotifier] looks it up when a Cancel button is tapped.
+/// single in-app handler.
+///
+/// On Android, action-button taps from `flutter_local_notifications` are
+/// dispatched through a **background isolate** even if the app is in the
+/// foreground. So we can't just call back into the UI directly — we send
+/// the track id over an [IsolateNameServer]-registered SendPort, and the
+/// main isolate listens. The owner of this router calls [bind] on startup
+/// and [unbind] on dispose.
 class DownloadActionRouter {
   DownloadActionRouter._();
   static final DownloadActionRouter instance = DownloadActionRouter._();
+
+  static const String _portName = 'podcastr.download.cancel';
+
   void Function(String trackId)? onCancel;
+  ReceivePort? _receivePort;
+
+  /// Wire up the cross-isolate cancel channel. Safe to call multiple times.
+  void bind() {
+    if (_receivePort != null) return;
+    final port = ReceivePort();
+    IsolateNameServer.removePortNameMapping(_portName);
+    IsolateNameServer.registerPortWithName(port.sendPort, _portName);
+    port.listen((dynamic msg) {
+      if (msg is String) {
+        onCancel?.call(msg);
+      }
+    });
+    _receivePort = port;
+  }
+
+  void unbind() {
+    IsolateNameServer.removePortNameMapping(_portName);
+    _receivePort?.close();
+    _receivePort = null;
+    onCancel = null;
+  }
+
+  /// Called from either isolate. Tries the direct handler first; if it's
+  /// missing (we're on the background isolate), routes via the port.
+  static void deliver(String trackId) {
+    final inst = instance;
+    if (inst.onCancel != null) {
+      inst.onCancel!(trackId);
+      return;
+    }
+    final port = IsolateNameServer.lookupPortByName(_portName);
+    port?.send(trackId);
+  }
+}
+
+/// Top-level entry point so the Flutter engine can invoke this from a
+/// background isolate (required by `flutter_local_notifications` for
+/// notification-action callbacks).
+@pragma('vm:entry-point')
+void _backgroundOnResponse(NotificationResponse response) {
+  final actionId = response.actionId;
+  final payload = response.payload;
+  if (actionId == null || payload == null) return;
+  if (actionId.startsWith(DownloadNotifier.cancelActionPrefix)) {
+    DownloadActionRouter.deliver(payload);
+  }
 }

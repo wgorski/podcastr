@@ -71,6 +71,13 @@
                 <action android:name="android.intent.action.MEDIA_BUTTON"/>
             </intent-filter>
         </receiver>
+        <!-- flutter_local_notifications: dispatches notification action button
+             taps (e.g. our download Cancel) to the Dart side. Without this
+             receiver entry the plugin's BroadcastReceiver is never registered
+             and tapping Cancel silently does nothing. -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
+            android:exported="false"/>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
