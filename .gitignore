@@ -1,0 +1,70 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Machine-local Android config (SDK / Flutter paths)
+/android/local.properties
+
+# Project-local Gradle home set by setup-env.sh
+/.gradle-home/
+
+# Project-local AVD storage
+/.android-avd/
+
+# Claude Design handoff bundle — reference only, not source
+/youtube-audio-extracted/
+/Youtube audio-handoff.zip
+
+# Test/debug screenshots from development sessions
+/em-*.png
+/emulator-*.png
+/library-*.png
+/after-*.png
+/share*.png
+/download*.png
+/lock*.png
+/search.png
+/page-*.png
+/.playwright-mcp/
