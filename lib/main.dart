@@ -268,37 +268,42 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                 ),
               ),
             if (hasCurrent && _screen == _Screen.player)
-              _SlideUp(
-                child: PopScope(
-                  canPop: false,
-                  onPopInvokedWithResult: (didPop, _) {
-                    if (!didPop) setState(() => _screen = _Screen.library);
-                  },
-                  child: Container(
-                    color: AuroraTheme.bg,
-                    child: SafeArea(
-                      top: false,
-                      child: NowPlayingScreen(
-                      track: _current!,
-                      playing: _playing,
-                      progress: _progress,
-                      speed: _speed,
-                      sleepRemaining: _sleepRemaining,
-                      onTogglePlay: _audio.toggle,
-                      onClose: () => setState(() => _screen = _Screen.library),
-                      onSeek: _audio.seekFraction,
-                      onCycleSpeed: _cycleSpeed,
-                      onPickSleepTimer: _setSleepTimer,
-                      onDelete: () async {
-                        final t = _current;
-                        if (t == null) return;
-                        setState(() => _screen = _Screen.library);
-                        await _deleteTrack(t);
-                      },
+              _DismissibleSheet(
+                onDismissed: () => setState(() => _screen = _Screen.library),
+                builder: (context, dismiss, onDragUpdate, onDragEnd) {
+                  return PopScope(
+                    canPop: false,
+                    onPopInvokedWithResult: (didPop, _) {
+                      if (!didPop) dismiss();
+                    },
+                    child: Container(
+                      color: AuroraTheme.bg,
+                      child: SafeArea(
+                        top: false,
+                        child: NowPlayingScreen(
+                          track: _current!,
+                          playing: _playing,
+                          progress: _progress,
+                          speed: _speed,
+                          sleepRemaining: _sleepRemaining,
+                          onTogglePlay: _audio.toggle,
+                          onClose: dismiss,
+                          onSeek: _audio.seekFraction,
+                          onCycleSpeed: _cycleSpeed,
+                          onPickSleepTimer: _setSleepTimer,
+                          onArtworkVerticalDragUpdate: onDragUpdate,
+                          onArtworkVerticalDragEnd: onDragEnd,
+                          onDelete: () async {
+                            final t = _current;
+                            if (t == null) return;
+                            setState(() => _screen = _Screen.library);
+                            await _deleteTrack(t);
+                          },
+                        ),
+                      ),
                     ),
-                  ),
-                  ),
-                ),
+                  );
+                },
               ),
             if (_screen == _Screen.search)
               _FadeIn(
@@ -470,18 +475,40 @@ class _AddButton extends StatelessWidget {
   }
 }
 
-class _SlideUp extends StatefulWidget {
-  final Widget child;
-  const _SlideUp({required this.child});
+/// Slides up on mount, slides down on dismiss. Supports an external drag
+/// (used on the Now Playing artwork) that follows the finger and commits
+/// the dismissal past a threshold or with enough downward velocity.
+typedef _SheetBuilder = Widget Function(
+  BuildContext context,
+  VoidCallback dismiss,
+  void Function(DragUpdateDetails) onDragUpdate,
+  void Function(DragEndDetails) onDragEnd,
+);
+
+class _DismissibleSheet extends StatefulWidget {
+  final _SheetBuilder builder;
+  final VoidCallback onDismissed;
+  const _DismissibleSheet({required this.builder, required this.onDismissed});
+
   @override
-  State<_SlideUp> createState() => _SlideUpState();
+  State<_DismissibleSheet> createState() => _DismissibleSheetState();
 }
 
-class _SlideUpState extends State<_SlideUp> with SingleTickerProviderStateMixin {
+class _DismissibleSheetState extends State<_DismissibleSheet>
+    with SingleTickerProviderStateMixin {
+  // 0.0 = fully shown, 1.0 = translated off-screen (one screen height down).
   late final AnimationController _c = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 300),
-  )..forward();
+    duration: const Duration(milliseconds: 280),
+    value: 1.0,
+  );
+  bool _settling = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _c.animateTo(0.0, curve: Curves.easeOut);
+  }
 
   @override
   void dispose() {
@@ -489,12 +516,45 @@ class _SlideUpState extends State<_SlideUp> with SingleTickerProviderStateMixin 
     super.dispose();
   }
 
+  void _onDragUpdate(DragUpdateDetails d) {
+    if (_settling) return;
+    final h = MediaQuery.of(context).size.height;
+    if (h <= 0) return;
+    _c.value = (_c.value + d.delta.dy / h).clamp(0.0, 1.0);
+  }
+
+  void _onDragEnd(DragEndDetails d) {
+    if (_settling) return;
+    final h = MediaQuery.of(context).size.height;
+    final velocityFraction = h <= 0 ? 0.0 : (d.primaryVelocity ?? 0) / h;
+    if (_c.value > 0.25 || velocityFraction > 1.5) {
+      _animateOut();
+    } else {
+      _c.animateTo(0.0,
+          duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+    }
+  }
+
+  Future<void> _animateOut() async {
+    if (_settling) return;
+    _settling = true;
+    await _c.animateTo(1.0,
+        duration: const Duration(milliseconds: 240), curve: Curves.easeIn);
+    if (mounted) widget.onDismissed();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return SlideTransition(
-      position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
-          .animate(CurvedAnimation(parent: _c, curve: Curves.easeOut)),
-      child: widget.child,
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        final h = MediaQuery.of(context).size.height;
+        return Transform.translate(
+          offset: Offset(0, _c.value * h),
+          child: child,
+        );
+      },
+      child: widget.builder(context, _animateOut, _onDragUpdate, _onDragEnd),
     );
   }
 }

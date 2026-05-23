@@ -17,6 +17,9 @@ class NowPlayingScreen extends StatelessWidget {
   final VoidCallback onCycleSpeed;
   final void Function(Duration?) onPickSleepTimer;
   final VoidCallback onDelete;
+  // Swipe-down on the artwork dismisses the player back to the library.
+  final void Function(DragUpdateDetails)? onArtworkVerticalDragUpdate;
+  final void Function(DragEndDetails)? onArtworkVerticalDragEnd;
 
   const NowPlayingScreen({
     super.key,
@@ -31,6 +34,8 @@ class NowPlayingScreen extends StatelessWidget {
     required this.onCycleSpeed,
     required this.onPickSleepTimer,
     required this.onDelete,
+    this.onArtworkVerticalDragUpdate,
+    this.onArtworkVerticalDragEnd,
   });
 
   @override
@@ -82,7 +87,7 @@ class NowPlayingScreen extends StatelessWidget {
                 ],
               ),
             ),
-            // Artwork
+            // Artwork — also the swipe-down handle to dismiss the player.
             Padding(
               padding: const EdgeInsets.fromLTRB(32, 14, 32, 14),
               child: Center(
@@ -90,21 +95,26 @@ class NowPlayingScreen extends StatelessWidget {
                   constraints: const BoxConstraints(maxWidth: 320),
                   child: AspectRatio(
                     aspectRatio: 1,
-                    child: LayoutBuilder(
-                      builder: (context, c) => Stack(
-                        children: [
-                          SquareArt(track: track, size: c.maxWidth, radius: 22),
-                          IgnorePointer(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(22),
-                                boxShadow: [
-                                  BoxShadow(color: track.color2.withValues(alpha: 0.33), blurRadius: 80, offset: const Offset(0, 30)),
-                                ],
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onVerticalDragUpdate: onArtworkVerticalDragUpdate,
+                      onVerticalDragEnd: onArtworkVerticalDragEnd,
+                      child: LayoutBuilder(
+                        builder: (context, c) => Stack(
+                          children: [
+                            SquareArt(track: track, size: c.maxWidth, radius: 22),
+                            IgnorePointer(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(22),
+                                  boxShadow: [
+                                    BoxShadow(color: track.color2.withValues(alpha: 0.33), blurRadius: 80, offset: const Offset(0, 30)),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
