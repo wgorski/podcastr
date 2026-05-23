@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
+enum TrackStatus { ready, downloading, failed }
+
 class Track {
   final String id;
   final String title;
@@ -16,6 +18,11 @@ class Track {
   /// Absolute path of the downloaded thumbnail. Falls back to procedural art
   /// when missing or unreadable.
   final String? thumbnailPath;
+  final TrackStatus status;
+  /// Original YouTube URL — kept for retrying a failed download.
+  final String? sourceUrl;
+  /// Populated when [status] is [TrackStatus.failed].
+  final String? errorMessage;
 
   const Track({
     required this.id,
@@ -28,6 +35,9 @@ class Track {
     required this.color2,
     this.filePath,
     this.thumbnailPath,
+    this.status = TrackStatus.ready,
+    this.sourceUrl,
+    this.errorMessage,
   });
 
   int get seed {
@@ -43,6 +53,10 @@ class Track {
     String? addedAt,
     String? filePath,
     String? thumbnailPath,
+    TrackStatus? status,
+    String? sourceUrl,
+    String? errorMessage,
+    bool clearErrorMessage = false,
   }) {
     return Track(
       id: id ?? this.id,
@@ -55,6 +69,9 @@ class Track {
       color2: color2,
       filePath: filePath ?? this.filePath,
       thumbnailPath: thumbnailPath ?? this.thumbnailPath,
+      status: status ?? this.status,
+      sourceUrl: sourceUrl ?? this.sourceUrl,
+      errorMessage: clearErrorMessage ? null : (errorMessage ?? this.errorMessage),
     );
   }
 
@@ -69,6 +86,9 @@ class Track {
         'color2': color2.toARGB32(),
         'filePath': filePath,
         'thumbnailPath': thumbnailPath,
+        'status': status.name,
+        'sourceUrl': sourceUrl,
+        'errorMessage': errorMessage,
       };
 
   factory Track.fromJson(Map<String, dynamic> j) => Track(
@@ -82,7 +102,19 @@ class Track {
         color2: Color(j['color2'] as int),
         filePath: j['filePath'] as String?,
         thumbnailPath: j['thumbnailPath'] as String?,
+        status: _statusFromJson(j['status']),
+        sourceUrl: j['sourceUrl'] as String?,
+        errorMessage: j['errorMessage'] as String?,
       );
+}
+
+TrackStatus _statusFromJson(Object? raw) {
+  if (raw is String) {
+    for (final s in TrackStatus.values) {
+      if (s.name == raw) return s;
+    }
+  }
+  return TrackStatus.ready;
 }
 
 /// Deterministic palette derived from a video ID — so each downloaded track

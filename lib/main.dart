@@ -10,7 +10,10 @@ import 'screens/library_screen.dart';
 import 'screens/lock_screen.dart';
 import 'screens/now_playing_screen.dart';
 import 'screens/search_screen.dart';
+import 'services/download_notifier.dart';
+import 'services/youtube_downloader.dart';
 import 'state/audio_controller.dart';
+import 'state/download_manager.dart';
 import 'state/library_store.dart';
 import 'theme/aurora_theme.dart';
 import 'widgets/mini_player.dart';
@@ -83,10 +86,18 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
       if (mounted) setState(() {});
     },
   );
+  late final DownloadManager _downloads = DownloadManager(
+    onCompleted: _onDownloadCompleted,
+    onFailed: _onDownloadFailed,
+  );
 
   List<Track> _tracks = const [];
   _Screen _screen = _Screen.library;
   double _speed = 1.0;
+  // The track currently rendered on the now-playing screen. Distinct from
+  // [_audio.current] because the player screen also surfaces downloading /
+  // failed tracks, which don't get loaded into the audio engine.
+  Track? _viewedTrack;
 
   String? _pendingDownloadUrl; // URL captured from a SEND / VIEW intent
   StreamSubscription<List<SharedMediaFile>>? _intentSub;
@@ -102,6 +113,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   @override
   void initState() {
     super.initState();
+    DownloadActionRouter.instance.onCancel = _cancelDownloadFromNotification;
     _load();
     _wireShareIntent();
   }
@@ -110,8 +122,17 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     final tracks = await _store.load();
     if (!mounted) return;
     setState(() => _tracks = tracks);
-    if (tracks.isNotEmpty) {
-      await _audio.load(tracks.first);
+    // Auto-load the first *ready* track so the mini-player has something
+    // to bind to.
+    Track? firstReady;
+    for (final t in tracks) {
+      if (t.status == TrackStatus.ready) {
+        firstReady = t;
+        break;
+      }
+    }
+    if (firstReady != null) {
+      await _audio.load(firstReady);
     }
   }
 
@@ -152,6 +173,8 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   void dispose() {
     _sleepTicker?.cancel();
     _intentSub?.cancel();
+    DownloadActionRouter.instance.onCancel = null;
+    _downloads.dispose();
     _audio.dispose();
     super.dispose();
   }
@@ -176,10 +199,22 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   Future<void> _persist() => _store.save(_tracks);
 
   Future<void> _selectTrack(Track t, {bool startPlaying = false}) async {
+    if (t.status != TrackStatus.ready) return;
     await _audio.load(t, andPlay: startPlaying);
   }
 
+  void _openTrack(Track t) {
+    setState(() {
+      _viewedTrack = t;
+      _screen = _Screen.player;
+    });
+    if (t.status == TrackStatus.ready) {
+      _selectTrack(t);
+    }
+  }
+
   Future<void> _playTapped(Track t) async {
+    if (t.status != TrackStatus.ready) return;
     if (_current?.id == t.id) {
       await _audio.toggle();
     } else {
@@ -196,20 +231,35 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   }
 
   Future<void> _nextTrack() async {
-    if (_tracks.isEmpty) return;
-    final i = _tracks.indexWhere((t) => t.id == _current?.id);
-    final next = _tracks[(i + 1) % _tracks.length];
+    final ready = _tracks.where((t) => t.status == TrackStatus.ready).toList();
+    if (ready.isEmpty) return;
+    final i = ready.indexWhere((t) => t.id == _current?.id);
+    final next = ready[(i + 1) % ready.length];
     await _selectTrack(next, startPlaying: true);
   }
 
   Future<void> _deleteTrack(Track t) async {
+    // Stop any in-flight download for this id; abort doesn't fire onFailed.
+    if (_downloads.isActive(t.id)) {
+      await _downloads.abort(t.id);
+    }
     final remaining = _tracks.where((x) => x.id != t.id).toList();
     final wasCurrent = _current?.id == t.id;
-    setState(() => _tracks = remaining);
+    setState(() {
+      _tracks = remaining;
+      if (_viewedTrack?.id == t.id) _viewedTrack = null;
+    });
     if (wasCurrent) {
       await _audio.stop();
-      if (remaining.isNotEmpty) {
-        await _audio.load(remaining.first);
+      Track? nextReady;
+      for (final x in remaining) {
+        if (x.status == TrackStatus.ready) {
+          nextReady = x;
+          break;
+        }
+      }
+      if (nextReady != null) {
+        await _audio.load(nextReady);
       }
     }
     await _audio.forget(t.id);
@@ -217,19 +267,79 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     await _persist();
   }
 
-  Future<void> _onDownloadComplete(Track t) async {
+  Future<void> _onStartDownload(Track downloading, ResolvedVideo resolved) async {
     setState(() {
-      _tracks = [t, ..._tracks];
+      _tracks = [downloading, ..._tracks];
       _screen = _Screen.library;
       _pendingDownloadUrl = null;
     });
-    await _audio.load(t);
     await _persist();
+    await _downloads.start(downloading, resolved);
+  }
+
+  Future<void> _onDownloadCompleted(Track ready) async {
+    if (!mounted) return;
+    setState(() {
+      _tracks = [
+        for (final t in _tracks) t.id == ready.id ? ready : t,
+      ];
+      if (_viewedTrack?.id == ready.id) {
+        _viewedTrack = ready;
+      }
+    });
+    // If nothing is currently loaded in the player, bind this fresh track.
+    if (_current == null) {
+      await _audio.load(ready);
+    }
+    await _persist();
+  }
+
+  Future<void> _onDownloadFailed(String trackId, String message) async {
+    if (!mounted) return;
+    setState(() {
+      _tracks = [
+        for (final t in _tracks)
+          t.id == trackId
+              ? t.copyWith(status: TrackStatus.failed, errorMessage: message)
+              : t,
+      ];
+      if (_viewedTrack?.id == trackId) {
+        _viewedTrack = _viewedTrack!
+            .copyWith(status: TrackStatus.failed, errorMessage: message);
+      }
+    });
+    await _persist();
+  }
+
+  Future<void> _cancelDownload(String trackId) async {
+    await _downloads.cancel(trackId);
+  }
+
+  void _cancelDownloadFromNotification(String trackId) {
+    // Routed from the notification action; bounce to the manager.
+    _downloads.cancel(trackId);
+  }
+
+  Future<void> _retryDownload(Track failed) async {
+    if (failed.sourceUrl == null) return;
+    final downloading = failed.copyWith(
+      status: TrackStatus.downloading,
+      clearErrorMessage: true,
+    );
+    setState(() {
+      _tracks = [
+        for (final t in _tracks) t.id == failed.id ? downloading : t,
+      ];
+      if (_viewedTrack?.id == failed.id) _viewedTrack = downloading;
+    });
+    await _persist();
+    await _downloads.resolveAndStart(downloading);
   }
 
   @override
   Widget build(BuildContext context) {
     final hasCurrent = _current != null;
+    final viewed = _viewedTrack;
     return Scaffold(
       backgroundColor: AuroraTheme.bg,
       body: DecoratedBox(
@@ -242,17 +352,15 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                 tracks: _tracks,
                 currentId: _current?.id,
                 playing: _playing,
-                onOpenTrack: (t) {
-                  _selectTrack(t);
-                  setState(() => _screen = _Screen.player);
-                },
+                onOpenTrack: _openTrack,
                 onPlay: _playTapped,
                 onDelete: _deleteTrack,
                 onSearch: () => setState(() => _screen = _Screen.search),
+                downloadProgressFor: _downloads.progressFor,
               ),
             ),
-            // Mini player — only when there's a current track and the library
-            // is foreground.
+            // Mini player — only when there's a current ready track and the
+            // library is foreground.
             if (hasCurrent && _screen == _Screen.library)
               Positioned(
                 left: 10,
@@ -263,14 +371,27 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                   playing: _playing,
                   progress: _progress,
                   onTogglePlay: _audio.toggle,
-                  onExpand: () => setState(() => _screen = _Screen.player),
+                  onExpand: () {
+                    setState(() {
+                      _viewedTrack = _current;
+                      _screen = _Screen.player;
+                    });
+                  },
                   onNext: _nextTrack,
                 ),
               ),
-            if (hasCurrent && _screen == _Screen.player)
+            if (viewed != null && _screen == _Screen.player)
               _DismissibleSheet(
                 onDismissed: () => setState(() => _screen = _Screen.library),
                 builder: (context, dismiss, onDragUpdate, onDragEnd) {
+                  // Pull the freshest copy of the viewed track from the
+                  // library list (status / errorMessage may have updated
+                  // since the user opened the screen).
+                  final fresh = _tracks.firstWhere(
+                    (t) => t.id == viewed.id,
+                    orElse: () => viewed,
+                  );
+                  final isReady = fresh.status == TrackStatus.ready;
                   return PopScope(
                     canPop: false,
                     onPopInvokedWithResult: (didPop, _) {
@@ -281,9 +402,9 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                       child: SafeArea(
                         top: false,
                         child: NowPlayingScreen(
-                          track: _current!,
-                          playing: _playing,
-                          progress: _progress,
+                          track: fresh,
+                          playing: isReady ? _playing : false,
+                          progress: isReady ? _progress : 0.0,
                           speed: _speed,
                           sleepRemaining: _sleepRemaining,
                           onTogglePlay: _audio.toggle,
@@ -291,13 +412,14 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                           onSeek: _audio.seekFraction,
                           onCycleSpeed: _cycleSpeed,
                           onPickSleepTimer: _setSleepTimer,
+                          downloadProgress: _downloads.progressFor(fresh.id),
+                          onCancelDownload: () => _cancelDownload(fresh.id),
+                          onRetryDownload: () => _retryDownload(fresh),
                           onArtworkVerticalDragUpdate: onDragUpdate,
                           onArtworkVerticalDragEnd: onDragEnd,
                           onDelete: () async {
-                            final t = _current;
-                            if (t == null) return;
                             setState(() => _screen = _Screen.library);
-                            await _deleteTrack(t);
+                            await _deleteTrack(fresh);
                           },
                         ),
                       ),
@@ -313,8 +435,13 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                     tracks: _tracks,
                     onClose: () => setState(() => _screen = _Screen.library),
                     onSelect: (t) {
-                      _selectTrack(t, startPlaying: true);
-                      setState(() => _screen = _Screen.player);
+                      if (t.status == TrackStatus.ready) {
+                        _selectTrack(t, startPlaying: true);
+                      }
+                      setState(() {
+                        _viewedTrack = t;
+                        _screen = _Screen.player;
+                      });
                     },
                   ),
                 ),
@@ -326,7 +453,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                   _screen = _Screen.library;
                   _pendingDownloadUrl = null;
                 }),
-                onComplete: _onDownloadComplete,
+                onStartDownload: _onStartDownload,
               ),
             if (hasCurrent && _screen == _Screen.lock)
               _FadeIn(

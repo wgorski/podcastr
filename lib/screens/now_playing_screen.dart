@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../models/track.dart';
+import '../services/youtube_downloader.dart';
 import '../theme/aurora_theme.dart';
 import '../widgets/thumbnail.dart';
 import '../widgets/waveform_scrubber.dart';
@@ -17,6 +19,10 @@ class NowPlayingScreen extends StatelessWidget {
   final VoidCallback onCycleSpeed;
   final void Function(Duration?) onPickSleepTimer;
   final VoidCallback onDelete;
+  /// Live progress for downloading tracks. Ignored when status is ready.
+  final ValueListenable<DownloadProgress?>? downloadProgress;
+  final VoidCallback? onCancelDownload;
+  final VoidCallback? onRetryDownload;
   // Swipe-down on the artwork dismisses the player back to the library.
   final void Function(DragUpdateDetails)? onArtworkVerticalDragUpdate;
   final void Function(DragEndDetails)? onArtworkVerticalDragEnd;
@@ -34,14 +40,15 @@ class NowPlayingScreen extends StatelessWidget {
     required this.onCycleSpeed,
     required this.onPickSleepTimer,
     required this.onDelete,
+    this.downloadProgress,
+    this.onCancelDownload,
+    this.onRetryDownload,
     this.onArtworkVerticalDragUpdate,
     this.onArtworkVerticalDragEnd,
   });
 
   @override
   Widget build(BuildContext context) {
-    final bars = waveformBars(track.id, count: 56);
-    final elapsed = (progress * track.duration).floor();
     return Stack(
       children: [
         // Glow from artwork color
@@ -62,130 +69,36 @@ class NowPlayingScreen extends StatelessWidget {
         Column(
           children: [
             SizedBox(height: MediaQuery.of(context).padding.top + 12),
-            // Header
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-              child: Row(
-                children: [
-                  IconButton(
-                    onPressed: onClose,
-                    icon: const Icon(Icons.keyboard_arrow_down_rounded, color: AuroraTheme.text, size: 28),
-                  ),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        Text(
-                          'NOW PLAYING',
-                          style: AuroraTheme.body(size: 10, weight: FontWeight.w700, color: AuroraTheme.muted, letterSpacing: 1.5),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(track.channel, style: AuroraTheme.body(size: 12, weight: FontWeight.w600)),
-                      ],
-                    ),
-                  ),
-                  _MoreMenu(onDelete: () => _confirmDelete(context)),
-                ],
-              ),
+            _Header(
+              track: track,
+              onClose: onClose,
+              onDelete: () => _confirmDelete(context),
             ),
-            // Artwork — also the swipe-down handle to dismiss the player.
-            Padding(
-              padding: const EdgeInsets.fromLTRB(32, 14, 32, 14),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 320),
-                  child: AspectRatio(
-                    aspectRatio: 1,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onVerticalDragUpdate: onArtworkVerticalDragUpdate,
-                      onVerticalDragEnd: onArtworkVerticalDragEnd,
-                      child: LayoutBuilder(
-                        builder: (context, c) => Stack(
-                          children: [
-                            SquareArt(track: track, size: c.maxWidth, radius: 22),
-                            IgnorePointer(
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(22),
-                                  boxShadow: [
-                                    BoxShadow(color: track.color2.withValues(alpha: 0.33), blurRadius: 80, offset: const Offset(0, 30)),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
+            _Artwork(
+              track: track,
+              onVerticalDragUpdate: onArtworkVerticalDragUpdate,
+              onVerticalDragEnd: onArtworkVerticalDragEnd,
+            ),
+            _TitleBlock(track: track),
+            const SizedBox(height: 4),
+            Expanded(
+              child: SingleChildScrollView(
+                physics: const NeverScrollableScrollPhysics(),
+                child: _BodyForStatus(
+                  track: track,
+                  playing: playing,
+                  progress: progress,
+                  speed: speed,
+                  sleepRemaining: sleepRemaining,
+                  onTogglePlay: onTogglePlay,
+                  onSeek: onSeek,
+                  onCycleSpeed: onCycleSpeed,
+                  onPickSleepTimer: onPickSleepTimer,
+                  downloadProgress: downloadProgress,
+                  onCancelDownload: onCancelDownload,
+                  onRetryDownload: onRetryDownload,
+                  onDelete: onDelete,
                 ),
-              ),
-            ),
-            // Title
-            Padding(
-              padding: const EdgeInsets.fromLTRB(26, 10, 26, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    track.title,
-                    style: AuroraTheme.display(size: 20, weight: FontWeight.w700, letterSpacing: -0.4).copyWith(height: 1.15),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    track.channel,
-                    style: AuroraTheme.body(size: 13, weight: FontWeight.w600, color: AuroraTheme.muted),
-                  ),
-                ],
-              ),
-            ),
-            // Scrubber
-            Padding(
-              padding: const EdgeInsets.fromLTRB(26, 6, 26, 0),
-              child: Column(
-                children: [
-                  WaveformScrubber(bars: bars, progress: progress, onSeek: onSeek),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        formatDuration(elapsed),
-                        style: AuroraTheme.mono(size: 11, weight: FontWeight.w500, color: AuroraTheme.muted),
-                      ),
-                      Text(
-                        '-${formatDuration(track.duration - elapsed)}',
-                        style: AuroraTheme.mono(size: 11, weight: FontWeight.w500, color: AuroraTheme.muted),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            // Main controls: speed | back15 | play | forward30 | sleep timer
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  _SpeedPill(speed: speed, onTap: onCycleSpeed),
-                  IconButton(
-                    onPressed: () => onSeek((progress - 15 / track.duration).clamp(0.0, 1.0)),
-                    icon: const SkipIcon(seconds: 15, forward: false, color: AuroraTheme.text),
-                    iconSize: 28,
-                  ),
-                  _PlayButton(playing: playing, onTap: onTogglePlay),
-                  IconButton(
-                    onPressed: () => onSeek((progress + 30 / track.duration).clamp(0.0, 1.0)),
-                    icon: const SkipIcon(seconds: 30, forward: true, color: AuroraTheme.text),
-                    iconSize: 28,
-                  ),
-                  _SleepControl(
-                    remaining: sleepRemaining,
-                    onTap: () => _openSleepSheet(context),
-                  ),
-                ],
               ),
             ),
           ],
@@ -202,26 +115,500 @@ class NowPlayingScreen extends StatelessWidget {
     );
     if (result == true) onDelete();
   }
+}
 
-  Future<void> _openSleepSheet(BuildContext context) async {
-    final selection = await showModalBottomSheet<_SleepChoice>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _SleepTimerSheet(active: sleepRemaining != null),
+class _Header extends StatelessWidget {
+  final Track track;
+  final VoidCallback onClose;
+  final VoidCallback onDelete;
+  const _Header({required this.track, required this.onClose, required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = switch (track.status) {
+      TrackStatus.downloading => 'DOWNLOADING',
+      TrackStatus.failed => 'DOWNLOAD FAILED',
+      TrackStatus.ready => 'NOW PLAYING',
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      child: Row(
+        children: [
+          IconButton(
+            onPressed: onClose,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded, color: AuroraTheme.text, size: 28),
+          ),
+          Expanded(
+            child: Column(
+              children: [
+                Text(
+                  label,
+                  style: AuroraTheme.body(
+                    size: 10,
+                    weight: FontWeight.w700,
+                    color: track.status == TrackStatus.failed
+                        ? const Color(0xFFFF6E80)
+                        : AuroraTheme.muted,
+                    letterSpacing: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(track.channel, style: AuroraTheme.body(size: 12, weight: FontWeight.w600)),
+              ],
+            ),
+          ),
+          _MoreMenu(onDelete: onDelete),
+        ],
+      ),
     );
-    if (selection == null) return;
-    switch (selection.kind) {
-      case _SleepKind.off:
-        onPickSleepTimer(null);
-        break;
-      case _SleepKind.duration:
-        onPickSleepTimer(selection.duration);
-        break;
-      case _SleepKind.endOfClip:
-        final remainingSec = (track.duration - track.duration * progress).round();
-        onPickSleepTimer(Duration(seconds: remainingSec.clamp(1, 24 * 3600)));
-        break;
+  }
+}
+
+class _Artwork extends StatelessWidget {
+  final Track track;
+  final void Function(DragUpdateDetails)? onVerticalDragUpdate;
+  final void Function(DragEndDetails)? onVerticalDragEnd;
+  const _Artwork({
+    required this.track,
+    this.onVerticalDragUpdate,
+    this.onVerticalDragEnd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(32, 14, 32, 14),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: AspectRatio(
+            aspectRatio: 1,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onVerticalDragUpdate: onVerticalDragUpdate,
+              onVerticalDragEnd: onVerticalDragEnd,
+              child: LayoutBuilder(
+                builder: (context, c) => Stack(
+                  children: [
+                    SquareArt(track: track, size: c.maxWidth, radius: 22),
+                    IgnorePointer(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(22),
+                          boxShadow: [
+                            BoxShadow(
+                              color: track.color2.withValues(alpha: 0.33),
+                              blurRadius: 80,
+                              offset: const Offset(0, 30),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TitleBlock extends StatelessWidget {
+  final Track track;
+  const _TitleBlock({required this.track});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(26, 10, 26, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            track.title,
+            style: AuroraTheme.display(size: 20, weight: FontWeight.w700, letterSpacing: -0.4)
+                .copyWith(height: 1.15),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            track.channel,
+            style: AuroraTheme.body(size: 13, weight: FontWeight.w600, color: AuroraTheme.muted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BodyForStatus extends StatelessWidget {
+  final Track track;
+  final bool playing;
+  final double progress;
+  final double speed;
+  final Duration? sleepRemaining;
+  final VoidCallback onTogglePlay;
+  final ValueChanged<double> onSeek;
+  final VoidCallback onCycleSpeed;
+  final void Function(Duration?) onPickSleepTimer;
+  final ValueListenable<DownloadProgress?>? downloadProgress;
+  final VoidCallback? onCancelDownload;
+  final VoidCallback? onRetryDownload;
+  final VoidCallback onDelete;
+
+  const _BodyForStatus({
+    required this.track,
+    required this.playing,
+    required this.progress,
+    required this.speed,
+    required this.sleepRemaining,
+    required this.onTogglePlay,
+    required this.onSeek,
+    required this.onCycleSpeed,
+    required this.onPickSleepTimer,
+    required this.downloadProgress,
+    required this.onCancelDownload,
+    required this.onRetryDownload,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    switch (track.status) {
+      case TrackStatus.downloading:
+        return _DownloadingBody(
+          progress: downloadProgress ?? const _NullProgress(),
+          onCancel: onCancelDownload,
+        );
+      case TrackStatus.failed:
+        return _FailedBody(
+          errorMessage: track.errorMessage ?? 'Unknown error',
+          onRetry: onRetryDownload,
+          onDelete: onDelete,
+        );
+      case TrackStatus.ready:
+        return _ReadyBody(
+          track: track,
+          playing: playing,
+          progress: progress,
+          speed: speed,
+          sleepRemaining: sleepRemaining,
+          onTogglePlay: onTogglePlay,
+          onSeek: onSeek,
+          onCycleSpeed: onCycleSpeed,
+          onPickSleepTimer: onPickSleepTimer,
+        );
     }
+  }
+}
+
+class _ReadyBody extends StatelessWidget {
+  final Track track;
+  final bool playing;
+  final double progress;
+  final double speed;
+  final Duration? sleepRemaining;
+  final VoidCallback onTogglePlay;
+  final ValueChanged<double> onSeek;
+  final VoidCallback onCycleSpeed;
+  final void Function(Duration?) onPickSleepTimer;
+  const _ReadyBody({
+    required this.track,
+    required this.playing,
+    required this.progress,
+    required this.speed,
+    required this.sleepRemaining,
+    required this.onTogglePlay,
+    required this.onSeek,
+    required this.onCycleSpeed,
+    required this.onPickSleepTimer,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bars = waveformBars(track.id, count: 56);
+    final elapsed = (progress * track.duration).floor();
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(26, 6, 26, 0),
+          child: Column(
+            children: [
+              WaveformScrubber(bars: bars, progress: progress, onSeek: onSeek),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    formatDuration(elapsed),
+                    style: AuroraTheme.mono(
+                      size: 11,
+                      weight: FontWeight.w500,
+                      color: AuroraTheme.muted,
+                    ),
+                  ),
+                  Text(
+                    '-${formatDuration(track.duration - elapsed)}',
+                    style: AuroraTheme.mono(
+                      size: 11,
+                      weight: FontWeight.w500,
+                      color: AuroraTheme.muted,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              _SpeedPill(speed: speed, onTap: onCycleSpeed),
+              IconButton(
+                onPressed: () => onSeek((progress - 15 / track.duration).clamp(0.0, 1.0)),
+                icon: const SkipIcon(seconds: 15, forward: false, color: AuroraTheme.text),
+                iconSize: 28,
+              ),
+              _PlayButton(playing: playing, onTap: onTogglePlay),
+              IconButton(
+                onPressed: () => onSeek((progress + 30 / track.duration).clamp(0.0, 1.0)),
+                icon: const SkipIcon(seconds: 30, forward: true, color: AuroraTheme.text),
+                iconSize: 28,
+              ),
+              _SleepControl(
+                remaining: sleepRemaining,
+                onTap: () => _openSleepSheet(context, sleepRemaining != null, onPickSleepTimer, track, progress),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DownloadingBody extends StatelessWidget {
+  final ValueListenable<DownloadProgress?> progress;
+  final VoidCallback? onCancel;
+  const _DownloadingBody({required this.progress, required this.onCancel});
+
+  String _mb(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(1);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(26, 18, 26, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ValueListenableBuilder<DownloadProgress?>(
+            valueListenable: progress,
+            builder: (context, p, _) {
+              final received = p?.bytesReceived ?? 0;
+              final total = p?.totalBytes ?? 0;
+              final indeterminate = total <= 0;
+              final pct = indeterminate ? null : (p!.fraction * 100).round();
+              return Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        indeterminate ? 'Downloading…' : '$pct%',
+                        style: AuroraTheme.mono(
+                          size: 13,
+                          weight: FontWeight.w700,
+                          color: AuroraTheme.accent,
+                        ),
+                      ),
+                      Text(
+                        indeterminate
+                            ? '${_mb(received)} MB'
+                            : '${_mb(received)} / ${_mb(total)} MB',
+                        style: AuroraTheme.mono(size: 12, color: AuroraTheme.muted),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: SizedBox(
+                      height: 8,
+                      child: indeterminate
+                          ? LinearProgressIndicator(
+                              backgroundColor: Colors.white.withValues(alpha: 0.08),
+                              valueColor:
+                                  const AlwaysStoppedAnimation(AuroraTheme.accent),
+                            )
+                          : Stack(
+                              children: [
+                                Container(color: Colors.white.withValues(alpha: 0.08)),
+                                FractionallySizedBox(
+                                  widthFactor: p!.fraction,
+                                  child: const DecoratedBox(
+                                    decoration:
+                                        BoxDecoration(gradient: AuroraTheme.accentGradient),
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 22),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: onCancel,
+              icon: const Icon(Icons.stop_circle_outlined,
+                  size: 18, color: Color(0xFFFF6E80)),
+              label: Text(
+                'Cancel download',
+                style: AuroraTheme.body(
+                  size: 14,
+                  weight: FontWeight.w700,
+                  color: const Color(0xFFFF6E80),
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                side: const BorderSide(color: Color(0x66FF6E80)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                backgroundColor: const Color(0x14FF6E80),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FailedBody extends StatelessWidget {
+  final String errorMessage;
+  final VoidCallback? onRetry;
+  final VoidCallback onDelete;
+  const _FailedBody({
+    required this.errorMessage,
+    required this.onRetry,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(26, 16, 26, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0x14FF6E80),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0x33FF6E80), width: 1),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.error_outline_rounded,
+                    size: 18, color: Color(0xFFFF6E80)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    errorMessage,
+                    style: AuroraTheme.body(
+                      size: 12,
+                      color: const Color(0xFFFFB9C2),
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded,
+                  size: 18, color: AuroraTheme.onAccent),
+              label: Text(
+                'Retry download',
+                style: AuroraTheme.body(
+                  size: 14,
+                  weight: FontWeight.w700,
+                  color: AuroraTheme.onAccent,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AuroraTheme.accent,
+                foregroundColor: AuroraTheme.onAccent,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                elevation: 0,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: onDelete,
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                side: const BorderSide(color: AuroraTheme.border),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              child: Text(
+                'Delete',
+                style: AuroraTheme.body(
+                  size: 13,
+                  weight: FontWeight.w600,
+                  color: AuroraTheme.muted,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Future<void> _openSleepSheet(
+  BuildContext context,
+  bool active,
+  void Function(Duration?) onPick,
+  Track track,
+  double progress,
+) async {
+  final selection = await showModalBottomSheet<_SleepChoice>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    builder: (ctx) => _SleepTimerSheet(active: active),
+  );
+  if (selection == null) return;
+  switch (selection.kind) {
+    case _SleepKind.off:
+      onPick(null);
+      break;
+    case _SleepKind.duration:
+      onPick(selection.duration);
+      break;
+    case _SleepKind.endOfClip:
+      final remainingSec = (track.duration - track.duration * progress).round();
+      onPick(Duration(seconds: remainingSec.clamp(1, 24 * 3600)));
+      break;
   }
 }
 
@@ -561,4 +948,14 @@ class _SleepOption extends StatelessWidget {
       ),
     );
   }
+}
+
+class _NullProgress extends ValueListenable<DownloadProgress?> {
+  const _NullProgress();
+  @override
+  void addListener(VoidCallback listener) {}
+  @override
+  void removeListener(VoidCallback listener) {}
+  @override
+  DownloadProgress? get value => null;
 }

@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../models/track.dart';
+import '../services/youtube_downloader.dart';
 import '../theme/aurora_theme.dart';
 import '../widgets/library_card.dart';
 
@@ -11,6 +13,10 @@ class LibraryScreen extends StatefulWidget {
   final void Function(Track) onPlay;
   final void Function(Track) onDelete;
   final VoidCallback onSearch;
+  /// Returns the live progress listenable for a downloading track.
+  /// Called only for `TrackStatus.downloading` rows.
+  final ValueListenable<DownloadProgress?> Function(String trackId)?
+      downloadProgressFor;
 
   const LibraryScreen({
     super.key,
@@ -21,6 +27,7 @@ class LibraryScreen extends StatefulWidget {
     required this.onPlay,
     required this.onDelete,
     required this.onSearch,
+    this.downloadProgressFor,
   });
 
   @override
@@ -92,6 +99,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     onOpen: () => widget.onOpenTrack(t),
                     onPlay: () => widget.onPlay(t),
                     onLongPress: () => _confirmDelete(t),
+                    downloadProgress: t.status == TrackStatus.downloading
+                        ? widget.downloadProgressFor?.call(t.id)
+                        : null,
                   );
                 },
               ),

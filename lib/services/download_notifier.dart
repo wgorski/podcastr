@@ -8,6 +8,7 @@ class DownloadNotifier {
   static const _channelId = 'podcastr.downloads';
   static const _channelName = 'Downloads';
   static const _channelDescription = 'Audio download progress';
+  static const cancelActionPrefix = 'cancel_';
 
   final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
   Future<void>? _initFuture;
@@ -25,7 +26,10 @@ class DownloadNotifier {
     const init = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
     );
-    await _plugin.initialize(init);
+    await _plugin.initialize(
+      init,
+      onDidReceiveNotificationResponse: _onResponse,
+    );
     final android = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
     await android?.createNotificationChannel(const AndroidNotificationChannel(
@@ -44,12 +48,23 @@ class DownloadNotifier {
     } catch (_) {/* already running or denied — ignore */}
   }
 
+  void _onResponse(NotificationResponse response) {
+    final actionId = response.actionId;
+    final payload = response.payload;
+    if (actionId == null || payload == null) return;
+    if (actionId.startsWith(cancelActionPrefix)) {
+      DownloadActionRouter.instance.onCancel?.call(payload);
+    }
+  }
+
   /// Show or update the progress notification for [id].
   /// [percent] is 0..100. If [percent] is null, an indeterminate bar is shown.
+  /// [payload] is the track id used to route the Cancel action back.
   Future<void> progress({
     required int id,
     required String title,
     required String channel,
+    required String payload,
     int? percent,
     String? subtext,
   }) async {
@@ -77,9 +92,17 @@ class DownloadNotifier {
         ticker: 'Downloading $title',
         subText: subtext ?? channel,
         showWhen: false,
+        actions: <AndroidNotificationAction>[
+          AndroidNotificationAction(
+            '$cancelActionPrefix$payload',
+            'Cancel',
+            showsUserInterface: false,
+            cancelNotification: false,
+          ),
+        ],
       ),
     );
-    await _plugin.show(id, title, channel, details);
+    await _plugin.show(id, title, channel, details, payload: payload);
   }
 
   /// Replace the progress notification with a final "Saved" line.
@@ -111,4 +134,13 @@ class DownloadNotifier {
     await _plugin.cancel(id);
     _lastPercent.remove(id);
   }
+}
+
+/// Routes notification-action callbacks (currently only "Cancel") back to a
+/// single in-app handler. The owning state registers [onCancel] on startup;
+/// the [DownloadNotifier] looks it up when a Cancel button is tapped.
+class DownloadActionRouter {
+  DownloadActionRouter._();
+  static final DownloadActionRouter instance = DownloadActionRouter._();
+  void Function(String trackId)? onCancel;
 }

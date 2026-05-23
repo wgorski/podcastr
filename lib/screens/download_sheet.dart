@@ -4,24 +4,28 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../models/track.dart';
-import '../services/download_notifier.dart';
 import '../services/youtube_downloader.dart';
 import '../theme/aurora_theme.dart';
 import '../widgets/thumbnail.dart';
 
-enum _Phase { resolving, ready, downloading, done, error }
+enum _Phase { resolving, ready, error }
 
-/// Bottom-sheet flow for downloading audio from a shared YouTube URL.
-/// Resolving (NewPipe Extractor) → ready (size shown) → downloading → done.
+/// Bottom-sheet flow for resolving a YouTube URL.
+///
+/// After this refactor the sheet only handles the resolve → ready → error
+/// transitions. Once the user confirms (Save audio) the sheet emits a
+/// freshly-built [Track] with [TrackStatus.downloading] and dismisses; the
+/// actual byte download then lives in [DownloadManager], with the row
+/// already visible in the library.
 class DownloadSheet extends StatefulWidget {
   final String url;
   final VoidCallback onClose;
-  final void Function(Track) onComplete;
+  final void Function(Track downloadingTrack, ResolvedVideo resolved) onStartDownload;
   const DownloadSheet({
     super.key,
     required this.url,
     required this.onClose,
-    required this.onComplete,
+    required this.onStartDownload,
   });
 
   @override
@@ -30,31 +34,15 @@ class DownloadSheet extends StatefulWidget {
 
 class _DownloadSheetState extends State<DownloadSheet> {
   final _downloader = YoutubeDownloader();
-  final _notifier = DownloadNotifier();
   _Phase _phase = _Phase.resolving;
   ResolvedVideo? _resolved;
-  double _progress = 0.0;
-  int _bytesReceived = 0;
-  int _totalBytes = 0;
   String? _errorMessage;
-  StreamSubscription<DownloadProgress>? _sub;
-  late final int _notificationId =
-      DateTime.now().millisecondsSinceEpoch.remainder(1 << 30);
 
   @override
   void initState() {
     super.initState();
     _resolve();
   }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
-
-  String _videoTitle() => _resolved?.title ?? 'Audio download';
-  String _videoChannel() => _resolved?.channel ?? '';
 
   Future<void> _resolve() async {
     try {
@@ -73,81 +61,26 @@ class _DownloadSheetState extends State<DownloadSheet> {
     }
   }
 
-  void _startDownload() async {
+  Future<void> _confirm() async {
     final v = _resolved;
     if (v == null) return;
-    setState(() {
-      _phase = _Phase.downloading;
-      _progress = 0;
-      _bytesReceived = 0;
-      _totalBytes = 0;
-    });
-    // Indeterminate at first — we don't have content-length until headers arrive.
-    _notifier.progress(
-      id: _notificationId,
-      title: _videoTitle(),
-      channel: _videoChannel(),
-      percent: null,
+    final filePath = await YoutubeDownloader.filePathFor(v);
+    if (!mounted) return;
+    final palette = paletteForId(v.videoId);
+    final track = Track(
+      id: v.videoId,
+      title: v.title,
+      channel: v.channel,
+      duration: v.durationSeconds,
+      size: '',
+      addedAt: 'Today',
+      color1: palette.c1,
+      color2: palette.c2,
+      filePath: filePath,
+      status: TrackStatus.downloading,
+      sourceUrl: widget.url,
     );
-    try {
-      final path = await YoutubeDownloader.filePathFor(v);
-      _sub = _downloader.download(v, filePath: path).listen((p) {
-        if (!mounted) return;
-        setState(() {
-          _bytesReceived = p.bytesReceived;
-          _totalBytes = p.totalBytes;
-          _progress = p.fraction;
-        });
-        _notifier.progress(
-          id: _notificationId,
-          title: _videoTitle(),
-          channel: _videoChannel(),
-          percent: p.totalBytes > 0 ? (p.fraction * 100).round() : null,
-        );
-      }, onError: (e) {
-        if (!mounted) return;
-        setState(() {
-          _phase = _Phase.error;
-          _errorMessage = e.toString();
-        });
-        _notifier.cancel(_notificationId);
-      }, onDone: () async {
-        if (!mounted) return;
-        // Sanity check: NewPipe sometimes hands back stream URLs that 200 OK
-        // but stream zero bytes (expired tokens, region blocks, etc.). Don't
-        // add a phantom track to the library.
-        if (_bytesReceived <= 0) {
-          setState(() {
-            _phase = _Phase.error;
-            _errorMessage = 'Download returned no audio bytes. The stream URL is likely invalid for this video.';
-          });
-          _notifier.cancel(_notificationId);
-          return;
-        }
-        setState(() => _phase = _Phase.done);
-        _notifier.complete(
-          id: _notificationId,
-          title: _videoTitle(),
-          channel: _videoChannel(),
-        );
-        // Pull the thumbnail in the background. Track gets added either way.
-        final thumb = await _downloader.downloadThumbnail(v);
-        if (!mounted) return;
-        Future.delayed(const Duration(milliseconds: 700), () {
-          if (!mounted) return;
-          widget.onComplete(
-            YoutubeDownloader.buildTrack(v, path, _bytesReceived, thumbnailPath: thumb),
-          );
-        });
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _phase = _Phase.error;
-        _errorMessage = e.toString();
-      });
-      _notifier.cancel(_notificationId);
-    }
+    widget.onStartDownload(track, v);
   }
 
   @override
@@ -169,13 +102,10 @@ class _DownloadSheetState extends State<DownloadSheet> {
             onTap: () {},
             child: _Sheet(
               phase: _phase,
-              progress: _progress,
-              bytesReceived: _bytesReceived,
-              totalBytes: _totalBytes,
               resolved: _resolved,
               errorMessage: _errorMessage,
               url: widget.url,
-              onDownload: _startDownload,
+              onDownload: _confirm,
               onClose: widget.onClose,
               onRetry: () {
                 setState(() {
@@ -194,9 +124,6 @@ class _DownloadSheetState extends State<DownloadSheet> {
 
 class _Sheet extends StatelessWidget {
   final _Phase phase;
-  final double progress;
-  final int bytesReceived;
-  final int totalBytes;
   final ResolvedVideo? resolved;
   final String? errorMessage;
   final String url;
@@ -205,9 +132,6 @@ class _Sheet extends StatelessWidget {
   final VoidCallback onRetry;
   const _Sheet({
     required this.phase,
-    required this.progress,
-    required this.bytesReceived,
-    required this.totalBytes,
     required this.resolved,
     required this.errorMessage,
     required this.url,
@@ -246,8 +170,7 @@ class _Sheet extends StatelessWidget {
               children: [
                 Text(
                   switch (phase) {
-                    _Phase.done => 'Saved',
-                    _Phase.error => 'Couldn\'t save',
+                    _Phase.error => 'Couldn\'t read this link',
                     _ => 'Save audio',
                   },
                   style: AuroraTheme.display(size: 18, weight: FontWeight.w700, letterSpacing: -0.3),
@@ -264,8 +187,6 @@ class _Sheet extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(22, 14, 22, 0),
             child: _MetadataCard(phase: phase, resolved: resolved, url: url),
           ),
-          if (phase == _Phase.downloading)
-            _Progress(progress: progress, bytesReceived: bytesReceived, totalBytes: totalBytes),
           if (phase == _Phase.error)
             Padding(
               padding: const EdgeInsets.fromLTRB(22, 14, 22, 0),
@@ -302,34 +223,6 @@ class _Sheet extends StatelessWidget {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       elevation: 0,
                     ),
-                  ),
-                ),
-              _Phase.downloading => SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
-                    onPressed: onClose,
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      side: const BorderSide(color: AuroraTheme.border),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      backgroundColor: Colors.white.withValues(alpha: 0.06),
-                    ),
-                    child: Text(
-                      'Cancel',
-                      style: AuroraTheme.body(size: 13, weight: FontWeight.w600, color: AuroraTheme.muted),
-                    ),
-                  ),
-                ),
-              _Phase.done => Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AuroraTheme.accentSoft,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    '✓ Added to your library',
-                    style: AuroraTheme.body(size: 14, weight: FontWeight.w700, color: AuroraTheme.accent),
                   ),
                 ),
               _Phase.error => Row(
@@ -434,13 +327,6 @@ class _MetadataCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (phase == _Phase.done)
-                  Container(
-                    width: 30,
-                    height: 30,
-                    decoration: const BoxDecoration(color: AuroraTheme.accent, shape: BoxShape.circle),
-                    child: const Icon(Icons.check_rounded, size: 16, color: AuroraTheme.onAccent),
-                  ),
               ],
             ),
     );
@@ -510,101 +396,6 @@ class _ShimmerState extends State<_Shimmer> with SingleTickerProviderStateMixin 
           ),
         );
       },
-    );
-  }
-}
-
-class _Progress extends StatefulWidget {
-  final double progress;
-  final int bytesReceived;
-  final int totalBytes;
-  const _Progress({required this.progress, required this.bytesReceived, required this.totalBytes});
-
-  @override
-  State<_Progress> createState() => _ProgressState();
-}
-
-class _ProgressState extends State<_Progress> with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1200),
-  )..repeat(reverse: true);
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
-  String _mb(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(1);
-
-  @override
-  Widget build(BuildContext context) {
-    final indeterminate = widget.totalBytes <= 0;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 16, 22, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                indeterminate ? '${_mb(widget.bytesReceived)} MB' : '${(widget.progress * 100).round()}%',
-                style: AuroraTheme.mono(size: 12, weight: FontWeight.w700, color: AuroraTheme.accent),
-              ),
-              Text(
-                indeterminate
-                    ? 'Downloading…'
-                    : '${_mb(widget.bytesReceived)} / ${_mb(widget.totalBytes)} MB',
-                style: AuroraTheme.mono(size: 12, color: AuroraTheme.muted),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(3),
-            child: SizedBox(
-              height: 6,
-              child: indeterminate
-                  ? LinearProgressIndicator(
-                      backgroundColor: Colors.white.withValues(alpha: 0.08),
-                      valueColor: const AlwaysStoppedAnimation(AuroraTheme.accent),
-                    )
-                  : Stack(
-                      children: [
-                        Container(color: Colors.white.withValues(alpha: 0.08)),
-                        FractionallySizedBox(
-                          widthFactor: widget.progress,
-                          child: const DecoratedBox(decoration: BoxDecoration(gradient: AuroraTheme.accentGradient)),
-                        ),
-                      ],
-                    ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              AnimatedBuilder(
-                animation: _pulse,
-                builder: (context, _) => Container(
-                  width: 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: AuroraTheme.accent.withValues(alpha: 0.4 + _pulse.value * 0.6),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                'Downloading · continues in the background',
-                style: AuroraTheme.body(size: 11, color: AuroraTheme.dim),
-              ),
-            ],
-          ),
-        ],
-      ),
     );
   }
 }
