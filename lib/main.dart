@@ -34,7 +34,7 @@ Future<void> main() async {
   // Hook the media-session foreground service. Each AudioPlayer in the app
   // will now surface a Spotify-style notification + lock-screen controls.
   await JustAudioBackground.init(
-    androidNotificationChannelId: 'com.example.podcastr.playback',
+    androidNotificationChannelId: 'com.wgorski.podcastr.playback',
     androidNotificationChannelName: 'Playback',
     androidNotificationIcon: 'drawable/ic_stat_music',
     androidNotificationOngoing: true,

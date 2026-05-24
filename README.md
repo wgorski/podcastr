@@ -96,7 +96,7 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 2. `receive_sharing_intent` delivers the URL to Dart on launch or
    while running. A regex picks out the YouTube link from the shared
    text.
-3. `DownloadSheet` calls Kotlin via `MethodChannel("com.example.podcastr/youtube")`:
+3. `DownloadSheet` calls Kotlin via `MethodChannel("com.wgorski.podcastr/youtube")`:
    - `MainActivity.kt` runs NewPipe Extractor's `YoutubeStreamExtractor`
      on a background dispatcher.
    - `NewPipeDownloader.kt` is an OkHttp-backed `Downloader` that sets a

@@ -1,4 +1,4 @@
-package com.example.podcastr
+package com.wgorski.podcastr
 
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -16,7 +16,7 @@ import org.schabi.newpipe.extractor.stream.VideoStream
 // audio_service / just_audio_background require the Activity to extend
 // AudioServiceActivity rather than the plain FlutterActivity.
 class MainActivity : AudioServiceActivity() {
-    private val channelName = "com.example.podcastr/youtube"
+    private val channelName = "com.wgorski.podcastr/youtube"
     private val scope = CoroutineScope(Dispatchers.Default)
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

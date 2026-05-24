@@ -2,7 +2,7 @@
 # Source this file to enter the Android dev environment for this project:
 #   source ./setup-env.sh
 
-export JAVA_HOME="/Users/ket/Library/Java/JavaVirtualMachines/corretto-17.0.9/Contents/Home"
+export JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 17 2>/dev/null)}"
 export ANDROID_HOME="/opt/homebrew/share/android-commandlinetools"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export GRADLE_USER_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.gradle-home"

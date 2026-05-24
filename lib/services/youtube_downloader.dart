@@ -7,7 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/track.dart';
 
-const _channel = MethodChannel('com.example.podcastr/youtube');
+const _channel = MethodChannel('com.wgorski.podcastr/youtube');
 
 /// What the Kotlin NewPipe Extractor bridge returns for a given YouTube URL.
 class ResolvedVideo {

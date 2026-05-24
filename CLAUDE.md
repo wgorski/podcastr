@@ -12,7 +12,7 @@ Flutter in a single iterative session.
 
 - **UI**: Flutter (Dart), single `lib/main.dart` orchestrating the screen graph
 - **YouTube extraction**: NewPipe Extractor v0.26.1 (Java/Kotlin) via a
-  `MethodChannel("com.example.podcastr/youtube")`
+  `MethodChannel("com.wgorski.podcastr/youtube")`
 - **Download**: Dart `package:http` streams the extracted audio URL to disk
 - **Playback**: `just_audio` + `just_audio_background` for media-session
   integration
@@ -50,13 +50,22 @@ lib/
     search_screen.dart           # live filter
     share_intent_screen.dart     # design mock; not wired at runtime
 
-android/app/src/main/kotlin/com/example/podcastr/
+android/app/src/main/kotlin/com/wgorski/podcastr/
   MainActivity.kt                # MethodChannel handler
   NewPipeDownloader.kt           # OkHttp-backed Downloader for NewPipe
 ```
 
 ## Conventions & gotchas the assistant should remember
 
+- **Versioning — semver, bump on every change.** The single source of truth
+  is the `version:` field in `pubspec.yaml` (Flutter forwards it to
+  `versionName`). With every change that lands on `main`, bump either the
+  **minor** component (`0.X.0`) for new features / behavior changes, or the
+  **patch** component (`0.0.X`) for bug fixes, refactors, or doc-only
+  touch-ups. Don't skip the bump — even small changes get one. Release APKs
+  are auto-named `podcastr-${versionName}.apk` via the `outputFileName` hook
+  in `android/app/build.gradle.kts`, so the file in
+  `build/app/outputs/flutter-apk/` always reflects the current version.
 - **Aurora theme only.** The original prototype shipped three themes (Ember,
   Aurora, Editorial). Only Aurora was ported; the others are not needed.
 - **No `Color.withOpacity`.** Use `Color.withValues(alpha: …)`. Requires
@@ -138,13 +147,13 @@ you must:
 1. `flutter analyze` — fix any warnings before continuing.
 2. `flutter build apk --debug` — must succeed.
 3. `adb install -r build/app/outputs/flutter-apk/app-debug.apk`.
-4. `adb shell am force-stop com.example.podcastr && adb shell am start -W -n com.example.podcastr/.MainActivity`.
+4. `adb shell am force-stop com.wgorski.podcastr && adb shell am start -W -n com.wgorski.podcastr/.MainActivity`.
 5. Wait until `adb shell dumpsys window | grep mCurrentFocus` lands on
-   `com.example.podcastr/.MainActivity`.
+   `com.wgorski.podcastr/.MainActivity`.
 6. `adb exec-out screencap -p > /tmp/<name>.png` and `sips -Z 1200 ... `
    for visual confirmation.
 7. For changes that involve the share-intent flow:
-   `adb shell 'am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT "<url>" -n com.example.podcastr/.MainActivity'`
+   `adb shell 'am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT "<url>" -n com.wgorski.podcastr/.MainActivity'`
    and screencap after a few seconds.
 
 Do not declare a change "done" until the emulator screenshot reflects it.

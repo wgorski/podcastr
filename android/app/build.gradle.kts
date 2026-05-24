@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.podcastr"
+    namespace = "com.wgorski.podcastr"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -19,7 +19,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.podcastr"
+        applicationId = "com.wgorski.podcastr"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -42,6 +42,37 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+    }
+
+    // Name the produced APK podcastr-<versionName>.apk so the artifact in
+    // build/app/outputs/flutter-apk/ always reflects the pubspec version.
+    // The Flutter Gradle plugin chains a doLast on assemble<Variant> that
+    // copies the APK into flutter-apk/ with a hard-coded `app-<buildType>.apk`
+    // name; we override outputFileName for the gradle output and append a
+    // second doLast that renames the Flutter copy to match.
+    applicationVariants.all {
+        val variant = this
+        val variantVersion = versionName
+        val buildTypeName = variant.buildType.name
+        outputs.all {
+            (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl)
+                .outputFileName = "podcastr-$variantVersion.apk"
+        }
+        // Flutter's CLI does a post-build existence check on `app-<buildType>.apk`
+        // (see flutter_tools/lib/src/android/gradle.dart#_apkFilesFor), so we
+        // leave that file in place and emit `podcastr-<versionName>.apk` next
+        // to it for distribution.
+        val capitalized = variant.name.replaceFirstChar { it.uppercase() }
+        tasks.matching { it.name == "assemble$capitalized" }.configureEach {
+            doLast {
+                val flutterApkDir = layout.buildDirectory.dir("outputs/flutter-apk").get().asFile
+                val src = flutterApkDir.resolve("app-$buildTypeName.apk")
+                val dst = flutterApkDir.resolve("podcastr-$variantVersion.apk")
+                if (src.exists()) {
+                    src.copyTo(dst, overwrite = true)
+                }
+            }
         }
     }
 }

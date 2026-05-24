@@ -1,4 +1,4 @@
-package com.example.podcastr
+package com.wgorski.podcastr
 
 import okhttp3.OkHttpClient
 import okhttp3.Request
