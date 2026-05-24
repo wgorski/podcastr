@@ -231,7 +231,11 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
       _viewedTrack = t;
       _screen = _Screen.player;
     });
-    if (t.status == TrackStatus.ready) {
+    // Skip the load() when this is already the active track — calling
+    // setAudioSource on the same file mid-playback restarts the decoder
+    // and stutters the audio. Same reason the mini-player's "expand" just
+    // pushes the view without touching the audio engine.
+    if (t.status == TrackStatus.ready && _current?.id != t.id) {
       _selectTrack(t);
     }
   }
