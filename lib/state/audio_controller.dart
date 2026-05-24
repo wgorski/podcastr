@@ -13,6 +13,7 @@ class AudioController {
   final AudioPlayer _player = AudioPlayer();
   final PositionStore _positions = PositionStore();
   final void Function() _onChanged;
+  final void Function(String trackId)? _onCompleted;
 
   Track? _current;
   double _speed = 1.0;
@@ -22,7 +23,11 @@ class AudioController {
   late final StreamSubscription _posSub;
   late final StreamSubscription _stateSub;
 
-  AudioController({required void Function() onChanged}) : _onChanged = onChanged {
+  AudioController({
+    required void Function() onChanged,
+    void Function(String trackId)? onCompleted,
+  })  : _onChanged = onChanged,
+        _onCompleted = onCompleted {
     _posSub = _player.positionStream.listen((_) {
       _onChanged();
       _maybeSavePosition();
@@ -33,7 +38,10 @@ class AudioController {
         _player.pause();
         _player.seek(Duration.zero);
         final t = _current;
-        if (t != null) _positions.remove(t.id);
+        if (t != null) {
+          _positions.remove(t.id);
+          _onCompleted?.call(t.id);
+        }
       } else if (!s.playing) {
         _saveNow();
       }

@@ -165,9 +165,17 @@ class _MetaRow extends StatelessWidget {
     }
     return Row(
       children: [
-        Text(
-          track.channel,
-          style: AuroraTheme.body(size: 12, weight: FontWeight.w600, color: AuroraTheme.text),
+        if (track.finished) ...[
+          const Icon(Icons.check_circle_rounded, size: 13, color: AuroraTheme.accent),
+          const SizedBox(width: 6),
+        ],
+        Flexible(
+          child: Text(
+            track.channel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AuroraTheme.body(size: 12, weight: FontWeight.w600, color: AuroraTheme.text),
+          ),
         ),
         const SizedBox(width: 8),
         const _Dot(),

@@ -23,6 +23,10 @@ class Track {
   final String? sourceUrl;
   /// Populated when [status] is [TrackStatus.failed].
   final String? errorMessage;
+  /// True once playback has reached the end at least once. Orthogonal to
+  /// [status]: a track can be `ready + finished` (downloaded, fully played).
+  /// Replaying does not clear this — only the Clear action does.
+  final bool finished;
 
   const Track({
     required this.id,
@@ -38,6 +42,7 @@ class Track {
     this.status = TrackStatus.ready,
     this.sourceUrl,
     this.errorMessage,
+    this.finished = false,
   });
 
   int get seed {
@@ -57,6 +62,7 @@ class Track {
     String? sourceUrl,
     String? errorMessage,
     bool clearErrorMessage = false,
+    bool? finished,
   }) {
     return Track(
       id: id ?? this.id,
@@ -72,6 +78,7 @@ class Track {
       status: status ?? this.status,
       sourceUrl: sourceUrl ?? this.sourceUrl,
       errorMessage: clearErrorMessage ? null : (errorMessage ?? this.errorMessage),
+      finished: finished ?? this.finished,
     );
   }
 
@@ -89,6 +96,7 @@ class Track {
         'status': status.name,
         'sourceUrl': sourceUrl,
         'errorMessage': errorMessage,
+        'finished': finished,
       };
 
   factory Track.fromJson(Map<String, dynamic> j) => Track(
@@ -105,6 +113,7 @@ class Track {
         status: _statusFromJson(j['status']),
         sourceUrl: j['sourceUrl'] as String?,
         errorMessage: j['errorMessage'] as String?,
+        finished: (j['finished'] as bool?) ?? false,
       );
 }
 

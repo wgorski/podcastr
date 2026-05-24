@@ -85,6 +85,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     onChanged: () {
       if (mounted) setState(() {});
     },
+    onCompleted: _onPlaybackCompleted,
   );
   late final DownloadManager _downloads = DownloadManager(
     onCompleted: _onDownloadCompleted,
@@ -234,6 +235,30 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     await _audio.setSpeed(next);
   }
 
+  void _onPlaybackCompleted(String trackId) {
+    if (!mounted) return;
+    final idx = _tracks.indexWhere((t) => t.id == trackId);
+    if (idx < 0) return;
+    if (_tracks[idx].finished) return;
+    setState(() {
+      _tracks = [
+        for (final t in _tracks) t.id == trackId ? t.copyWith(finished: true) : t,
+      ];
+      if (_viewedTrack?.id == trackId) {
+        _viewedTrack = _viewedTrack!.copyWith(finished: true);
+      }
+    });
+    _persist();
+  }
+
+  Future<void> _clearFinished() async {
+    final finished = _tracks.where((t) => t.finished).toList();
+    if (finished.isEmpty) return;
+    for (final t in finished) {
+      await _deleteTrack(t);
+    }
+  }
+
   Future<void> _deleteTrack(Track t) async {
     // Stop any in-flight download for this id; abort doesn't fire onFailed.
     if (_downloads.isActive(t.id)) {
@@ -371,6 +396,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                 onOpenTrack: _openTrack,
                 onPlay: _playTapped,
                 onDelete: _deleteTrack,
+                onClearFinished: _clearFinished,
                 onSearch: () => setState(() => _screen = _Screen.search),
                 downloadProgressFor: _downloads.progressFor,
               ),

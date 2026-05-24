@@ -12,6 +12,7 @@ class LibraryScreen extends StatefulWidget {
   final void Function(Track) onOpenTrack;
   final void Function(Track) onPlay;
   final void Function(Track) onDelete;
+  final Future<void> Function() onClearFinished;
   final VoidCallback onSearch;
   /// Returns the live progress listenable for a downloading track.
   /// Called only for `TrackStatus.downloading` rows.
@@ -26,6 +27,7 @@ class LibraryScreen extends StatefulWidget {
     required this.onOpenTrack,
     required this.onPlay,
     required this.onDelete,
+    required this.onClearFinished,
     required this.onSearch,
     this.downloadProgressFor,
   });
@@ -44,9 +46,51 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (result == true) widget.onDelete(t);
   }
 
+  Future<void> _confirmClearFinished(int count) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AuroraTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          'Clear finished podcasts?',
+          style: AuroraTheme.display(size: 18, weight: FontWeight.w700, letterSpacing: -0.3),
+        ),
+        content: Text(
+          count == 1
+              ? 'This will permanently delete 1 finished podcast.'
+              : 'This will permanently delete $count finished podcasts.',
+          style: AuroraTheme.body(size: 13, color: AuroraTheme.muted, height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(
+              'Cancel',
+              style: AuroraTheme.body(size: 13, weight: FontWeight.w600, color: AuroraTheme.muted),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(
+              'Delete',
+              style: AuroraTheme.body(
+                size: 13,
+                weight: FontWeight.w700,
+                color: const Color(0xFFFF6E80),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (result == true) await widget.onClearFinished();
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasTracks = widget.tracks.isNotEmpty;
+    final finishedCount = widget.tracks.where((t) => t.finished).length;
     return Padding(
       padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top + 8),
       child: Column(
@@ -81,6 +125,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   onPressed: widget.onSearch,
                   icon: const Icon(Icons.search_rounded, color: AuroraTheme.text, size: 21),
                 ),
+                if (finishedCount > 0)
+                  IconButton(
+                    onPressed: () => _confirmClearFinished(finishedCount),
+                    tooltip: 'Clear finished',
+                    icon: const Icon(Icons.delete_sweep_outlined, color: AuroraTheme.text, size: 21),
+                  ),
               ],
             ),
           ),
