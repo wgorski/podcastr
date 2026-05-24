@@ -33,17 +33,21 @@ class AudioController {
       _maybeSavePosition();
     });
     _stateSub = _player.playerStateStream.listen((s) {
-      // When the file finishes, reset position + drop the saved resume point.
+      // When the file finishes, pause but leave the position at the end so
+      // the UI keeps the waveform fully filled. Next call to [play] will
+      // rewind to zero.
       if (s.processingState == ProcessingState.completed) {
         _player.pause();
-        _player.seek(Duration.zero);
         final t = _current;
         if (t != null) {
           _positions.remove(t.id);
           _onCompleted?.call(t.id);
         }
       } else if (!s.playing) {
-        _saveNow();
+        // Pause from any source (in-app button, notification, Bluetooth,
+        // headset). Persist synchronously so it survives the foreground
+        // service stopping right after.
+        unawaited(_saveNow());
       }
       _onChanged();
     });
@@ -54,19 +58,21 @@ class AudioController {
 
   void _maybeSavePosition() {
     final now = DateTime.now();
-    if (now.difference(_lastSavedAt) < const Duration(seconds: 5)) return;
-    _saveNow();
+    // Save roughly once a second while playing — the throttle is short so a
+    // crash, kill, or missed pause event loses at most a second of progress.
+    if (now.difference(_lastSavedAt) < const Duration(seconds: 1)) return;
+    unawaited(_saveNow());
   }
 
-  void _saveNow() {
+  Future<void> _saveNow() async {
     final t = _current;
     if (t == null) return;
     final pos = _player.position;
     final total = _player.duration ?? Duration(seconds: t.duration);
     // Don't save the trivial endpoints: 0 means "fresh", end means "done".
     if (pos > const Duration(seconds: 2) && pos < total - const Duration(seconds: 2)) {
-      _positions.set(t.id, pos.inSeconds);
       _lastSavedAt = DateTime.now();
+      await _positions.set(t.id, pos.inSeconds);
     }
   }
 
@@ -75,8 +81,10 @@ class AudioController {
   double get speed => _speed;
 
   /// Fraction 0..1 — based on actual loaded duration when available, otherwise
-  /// the metadata duration from the Track.
+  /// the metadata duration from the Track. A finished track stays at 1.0 until
+  /// the user hits play again, at which point [play] seeks back to zero.
   double get progress {
+    if (_player.processingState == ProcessingState.completed) return 1.0;
     final pos = _player.position.inMilliseconds;
     final total = (_player.duration ?? Duration(seconds: _current?.duration ?? 0)).inMilliseconds;
     if (total == 0) return 0;
@@ -91,7 +99,7 @@ class AudioController {
   /// Resumes from the last persisted position if one exists.
   Future<void> load(Track t, {bool andPlay = false}) async {
     // Persist the previous track's position before switching off it.
-    _saveNow();
+    await _saveNow();
     _current = t;
     _ready = false;
     final path = t.filePath;
@@ -137,6 +145,11 @@ class AudioController {
       await load(_current!, andPlay: true);
       return;
     }
+    // After the track has played through, the player sits at the end with
+    // processingState=completed. Hitting play again should restart from zero.
+    if (_player.processingState == ProcessingState.completed) {
+      await _player.seek(Duration.zero);
+    }
     await _player.play();
   }
 
@@ -170,7 +183,7 @@ class AudioController {
   }
 
   Future<void> dispose() async {
-    _saveNow();
+    await _saveNow();
     await _posSub.cancel();
     await _stateSub.cancel();
     await _player.dispose();
