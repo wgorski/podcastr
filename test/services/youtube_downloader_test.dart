@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:podcastr/models/track.dart';
 import 'package:podcastr/services/youtube_downloader.dart';
 
 void main() {
@@ -106,60 +105,6 @@ void main() {
     test('fraction returns 0 when totalBytes is unknown (<=0)', () {
       expect(const DownloadProgress(123, 0).fraction, 0);
       expect(const DownloadProgress(123, -1).fraction, 0);
-    });
-  });
-
-  group('YoutubeDownloader.buildTrack', () {
-    test('hydrates a Track from a ResolvedVideo and download results', () {
-      final v = ResolvedVideo.fromMap({
-        'videoId': 'abc',
-        'title': 'Hello',
-        'channel': 'World',
-        'durationSeconds': 300,
-        'audioUrl': 'https://example.com/audio',
-        'averageBitrate': 128000,
-        'mimeType': 'audio/mp4',
-        'extension': 'm4a',
-        'thumbnailUrl': null,
-      });
-
-      final t = YoutubeDownloader.buildTrack(
-        v,
-        '/tmp/abc.m4a',
-        2 * 1024 * 1024,
-        thumbnailPath: '/tmp/abc.jpg',
-      );
-
-      expect(t.id, 'abc');
-      expect(t.title, 'Hello');
-      expect(t.channel, 'World');
-      expect(t.duration, 300);
-      expect(t.size, '2.0 MB');
-      expect(t.addedAt, 'Today');
-      expect(t.filePath, '/tmp/abc.m4a');
-      expect(t.thumbnailPath, '/tmp/abc.jpg');
-
-      // Palette is the deterministic one keyed off the video id.
-      final expected = paletteForId('abc');
-      expect(t.color1.toARGB32(), expected.c1.toARGB32());
-      expect(t.color2.toARGB32(), expected.c2.toARGB32());
-    });
-
-    test('omits thumbnailPath when none provided', () {
-      final v = ResolvedVideo.fromMap({
-        'videoId': 'xyz',
-        'title': '',
-        'channel': '',
-        'durationSeconds': 10,
-        'audioUrl': '',
-        'averageBitrate': 0,
-        'mimeType': '',
-        'extension': 'm4a',
-        'thumbnailUrl': null,
-      });
-      final t = YoutubeDownloader.buildTrack(v, '/tmp/xyz.m4a', 0);
-      expect(t.thumbnailPath, isNull);
-      expect(t.size, '— MB'); // 0 bytes path.
     });
   });
 

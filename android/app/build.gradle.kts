@@ -83,6 +83,13 @@ dependencies {
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // WorkManager: backs the foreground-service download worker so audio
+    // downloads survive app kill and OS-driven process death.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    // repeatOnLifecycle: keeps the WorkInfo Flow collector tied to the
+    // activity's lifecycle so we don't leak observers across configuration
+    // changes.
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }
 

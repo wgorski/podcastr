@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- INTERNET is required to download audio streams from YouTube. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Show the download progress as a status-bar notification (Android 13+). -->
@@ -6,6 +7,8 @@
     <!-- audio_service: foreground media playback service. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <!-- WorkManager: dataSync foreground service for resilient downloads. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <application
         android:label="Podcastr"
@@ -70,13 +73,15 @@
                 <action android:name="android.intent.action.MEDIA_BUTTON"/>
             </intent-filter>
         </receiver>
-        <!-- flutter_local_notifications: dispatches notification action button
-             taps (e.g. our download Cancel) to the Dart side. Without this
-             receiver entry the plugin's BroadcastReceiver is never registered
-             and tapping Cancel silently does nothing. -->
-        <receiver
-            android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
-            android:exported="false"/>
+        <!-- WorkManager's bundled <service> declaration omits
+             foregroundServiceType. Without it, setForeground() crashes on
+             Android 12+ with "foregroundServiceType 0x00000001 is not a
+             subset of foregroundServiceType attribute 0x00000000". Merge a
+             dataSync type onto the library's entry. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge"/>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

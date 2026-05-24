@@ -20,7 +20,7 @@ enum _Phase { resolving, ready, error }
 class DownloadSheet extends StatefulWidget {
   final String url;
   final VoidCallback onClose;
-  final void Function(Track downloadingTrack, ResolvedVideo resolved) onStartDownload;
+  final void Function(Track downloadingTrack) onStartDownload;
   const DownloadSheet({
     super.key,
     required this.url,
@@ -64,7 +64,7 @@ class _DownloadSheetState extends State<DownloadSheet> {
   Future<void> _confirm() async {
     final v = _resolved;
     if (v == null) return;
-    final filePath = await YoutubeDownloader.filePathFor(v);
+    final filePath = await YoutubeDownloader.predictedFilePath(v);
     if (!mounted) return;
     final palette = paletteForId(v.videoId);
     final track = Track(
@@ -80,7 +80,7 @@ class _DownloadSheetState extends State<DownloadSheet> {
       status: TrackStatus.downloading,
       sourceUrl: widget.url,
     );
-    widget.onStartDownload(track, v);
+    widget.onStartDownload(track);
   }
 
   @override

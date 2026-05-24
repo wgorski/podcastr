@@ -1,23 +1,33 @@
 package com.wgorski.podcastr
 
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.NewPipe
-import org.schabi.newpipe.extractor.ServiceList
-import org.schabi.newpipe.extractor.stream.AudioStream
-import org.schabi.newpipe.extractor.stream.Stream
-import org.schabi.newpipe.extractor.stream.VideoStream
 
 // audio_service / just_audio_background require the Activity to extend
 // AudioServiceActivity rather than the plain FlutterActivity.
 class MainActivity : AudioServiceActivity() {
-    private val channelName = "com.wgorski.podcastr/youtube"
-    private val scope = CoroutineScope(Dispatchers.Default)
+    private val methodChannelName = "com.wgorski.podcastr/youtube"
+    private val eventChannelName = "com.wgorski.podcastr/downloads"
+    private val ioScope = CoroutineScope(Dispatchers.Default)
+    private val observerJobs = mutableMapOf<String, Job>()
+    private var downloadEventsSink: EventChannel.EventSink? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -25,79 +35,214 @@ class MainActivity : AudioServiceActivity() {
         // NewPipe needs a Downloader once per process.
         NewPipe.init(NewPipeDownloader.get())
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
+        val messenger = flutterEngine.dartExecutor.binaryMessenger
+
+        MethodChannel(messenger, methodChannelName).setMethodCallHandler { call, result ->
             when (call.method) {
-                "resolve" -> {
-                    val url = call.argument<String>("url")
-                    if (url == null) {
-                        result.error("ARG", "Missing url", null)
-                        return@setMethodCallHandler
-                    }
-                    scope.launch {
-                        try {
-                            val resolved = withContext(Dispatchers.IO) { resolveYoutube(url) }
-                            withContext(Dispatchers.Main) { result.success(resolved) }
-                        } catch (t: Throwable) {
-                            withContext(Dispatchers.Main) {
-                                result.error("EXTRACT", t.message ?: t.javaClass.simpleName, null)
-                            }
-                        }
+                "resolve" -> handleResolve(call.argument<String>("url"), result)
+                "enqueueDownload" -> handleEnqueue(call.arguments as? Map<*, *>, result)
+                "cancelDownload" -> {
+                    val id = (call.arguments as? Map<*, *>)?.get("videoId") as? String
+                    if (id == null) result.error("ARG", "Missing videoId", null)
+                    else {
+                        WorkManager.getInstance(applicationContext).cancelUniqueWork(id)
+                        result.success(null)
                     }
                 }
+                "abandonDownload" -> {
+                    val id = (call.arguments as? Map<*, *>)?.get("videoId") as? String
+                    if (id == null) result.error("ARG", "Missing videoId", null)
+                    else {
+                        // Tear down the observer first so the cancel doesn't
+                        // emit a failed event for a row that's about to be
+                        // deleted.
+                        observerJobs.remove(id)?.cancel()
+                        WorkManager.getInstance(applicationContext).cancelUniqueWork(id)
+                        result.success(null)
+                    }
+                }
+                "restoreDownload" -> handleRestore(
+                    (call.arguments as? Map<*, *>)?.get("videoId") as? String,
+                    result,
+                )
                 else -> result.notImplemented()
+            }
+        }
+
+        EventChannel(messenger, eventChannelName).setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+                downloadEventsSink = events
+            }
+            override fun onCancel(arguments: Any?) {
+                downloadEventsSink = null
+            }
+        })
+    }
+
+    override fun onDestroy() {
+        for (job in observerJobs.values) job.cancel()
+        observerJobs.clear()
+        ioScope.cancel()
+        super.onDestroy()
+    }
+
+    private fun handleResolve(url: String?, result: MethodChannel.Result) {
+        if (url == null) {
+            result.error("ARG", "Missing url", null)
+            return
+        }
+        ioScope.launch {
+            try {
+                val resolved = withContext(Dispatchers.IO) { resolveYoutube(url) }
+                withContext(Dispatchers.Main) { result.success(resolved) }
+            } catch (t: Throwable) {
+                withContext(Dispatchers.Main) {
+                    result.error("EXTRACT", t.message ?: t.javaClass.simpleName, null)
+                }
             }
         }
     }
 
-    private fun resolveYoutube(url: String): Map<String, Any?> {
-        val extractor = ServiceList.YouTube.getStreamExtractor(url)
-        extractor.fetchPage()
-
-        // Prefer audio-only DASH streams (smaller, no video to throw away).
-        val audioStreams: List<AudioStream> = extractor.audioStreams
-        android.util.Log.d("Podcastr", "Streams for $url: audio=${audioStreams.size} video=${extractor.videoStreams.size} videoOnly=${extractor.videoOnlyStreams.size}")
-        val (chosen: Stream, bitrate: Int) = when {
-            audioStreams.isNotEmpty() -> {
-                val best = audioStreams.maxByOrNull { it.averageBitrate.takeIf { b -> b > 0 } ?: 0 }!!
-                best to best.averageBitrate
-            }
-            else -> {
-                // Fallback: some videos only expose muxed video+audio streams.
-                // just_audio will play the audio track from a video container fine.
-                val videoStreams: List<VideoStream> = extractor.videoStreams
-                if (videoStreams.isEmpty()) {
-                    throw IllegalStateException("No playable streams available for this video.")
-                }
-                // Smallest video (lowest resolution) — we only care about the audio track.
-                val smallest = videoStreams.minByOrNull {
-                    it.resolution?.removeSuffix("p")?.removeSuffix("60")?.toIntOrNull() ?: Int.MAX_VALUE
-                } ?: videoStreams.first()
-                smallest to 0
-            }
+    private fun handleEnqueue(args: Map<*, *>?, result: MethodChannel.Result) {
+        val videoId = args?.get("videoId") as? String
+        val sourceUrl = args?.get("sourceUrl") as? String
+        val tracksDir = args?.get("tracksDir") as? String
+        if (videoId == null || sourceUrl == null || tracksDir == null) {
+            result.error("ARG", "Missing videoId / sourceUrl / tracksDir", null)
+            return
         }
-        android.util.Log.d("Podcastr", "Chosen stream: type=${if (chosen is AudioStream) "audio" else "video"} mime=${chosen.format?.mimeType} url=${chosen.content?.take(120)}")
-        val mime = (chosen.format?.mimeType ?: "video/mp4")
-        val ext = when {
-            mime.contains("mp4") && chosen is AudioStream -> "m4a"
-            mime.contains("mp4") -> "mp4"
-            mime.contains("webm") -> "webm"
-            mime.contains("opus") -> "opus"
-            else -> "bin"
-        }
-        // Pick highest-resolution thumbnail (Image.estimatedResolutionLevel orders large→small).
-        val thumbnailUrl = extractor.thumbnails
-            ?.maxByOrNull { (it.width.takeIf { w -> w > 0 } ?: 0) * (it.height.takeIf { h -> h > 0 } ?: 0) }
-            ?.url
-        return mapOf(
-            "videoId" to extractor.id,
-            "title" to extractor.name,
-            "channel" to (extractor.uploaderName ?: ""),
-            "durationSeconds" to extractor.length,
-            "audioUrl" to chosen.content,
-            "averageBitrate" to bitrate,
-            "mimeType" to mime,
-            "extension" to ext,
-            "thumbnailUrl" to thumbnailUrl
+        val title = args["title"] as? String ?: ""
+        val channel = args["channel"] as? String ?: ""
+        val data = workDataOf(
+            DownloadWorker.KEY_VIDEO_ID to videoId,
+            DownloadWorker.KEY_SOURCE_URL to sourceUrl,
+            DownloadWorker.KEY_TRACKS_DIR to tracksDir,
+            DownloadWorker.KEY_TITLE to title,
+            DownloadWorker.KEY_CHANNEL to channel,
         )
+        val request = OneTimeWorkRequestBuilder<DownloadWorker>()
+            .setInputData(data)
+            .addTag(TAG_PREFIX + videoId)
+            .build()
+        WorkManager.getInstance(applicationContext)
+            .enqueueUniqueWork(videoId, ExistingWorkPolicy.REPLACE, request)
+        observeUniqueWork(videoId)
+        result.success(null)
+    }
+
+    private fun handleRestore(videoId: String?, result: MethodChannel.Result) {
+        if (videoId == null) {
+            result.error("ARG", "Missing videoId", null)
+            return
+        }
+        ioScope.launch {
+            val infos = try {
+                withContext(Dispatchers.IO) {
+                    WorkManager.getInstance(applicationContext)
+                        .getWorkInfosForUniqueWork(videoId)
+                        .get()
+                }
+            } catch (t: Throwable) {
+                emptyList<WorkInfo>()
+            }
+            withContext(Dispatchers.Main) {
+                val wi = infos.firstOrNull()
+                if (wi == null) {
+                    // No record — either never enqueued or WorkManager pruned
+                    // it after the retention window. Dart should mark the row
+                    // as failed.
+                    downloadEventsSink?.success(
+                        mapOf(
+                            "type" to "failed",
+                            "videoId" to videoId,
+                            "message" to "Interrupted",
+                        )
+                    )
+                    result.success("missing")
+                } else {
+                    // Emit the current snapshot, then keep observing (the
+                    // observer no-ops if state is already terminal).
+                    emit(videoId, wi)
+                    if (!wi.state.isFinished) {
+                        observeUniqueWork(videoId)
+                    }
+                    result.success("tracking")
+                }
+            }
+        }
+    }
+
+    private fun observeUniqueWork(videoId: String) {
+        observerJobs[videoId]?.cancel()
+        val job = lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                WorkManager.getInstance(applicationContext)
+                    .getWorkInfosForUniqueWorkFlow(videoId)
+                    .collect { infos ->
+                        val wi = infos.firstOrNull() ?: return@collect
+                        emit(videoId, wi)
+                        if (wi.state.isFinished) {
+                            observerJobs.remove(videoId)?.cancel()
+                        }
+                    }
+            }
+        }
+        observerJobs[videoId] = job
+    }
+
+    private fun emit(videoId: String, wi: WorkInfo) {
+        val sink = downloadEventsSink ?: return
+        val payload: Map<String, Any?> = when (wi.state) {
+            WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> mapOf(
+                "type" to "queued",
+                "videoId" to videoId,
+            )
+            WorkInfo.State.RUNNING -> mapOf(
+                "type" to "progress",
+                "videoId" to videoId,
+                "bytesReceived" to wi.progress.getLong(DownloadWorker.KEY_BYTES_RECEIVED, 0L),
+                "totalBytes" to wi.progress.getLong(DownloadWorker.KEY_TOTAL_BYTES, -1L),
+            )
+            WorkInfo.State.SUCCEEDED -> mapOf(
+                "type" to "completed",
+                "videoId" to videoId,
+                "filePath" to wi.outputData.getString(DownloadWorker.KEY_FILE_PATH),
+                "thumbnailPath" to wi.outputData.getString(DownloadWorker.KEY_THUMBNAIL_PATH),
+                "title" to wi.outputData.getString(DownloadWorker.KEY_TITLE),
+                "channel" to wi.outputData.getString(DownloadWorker.KEY_CHANNEL),
+                "durationSeconds" to wi.outputData.getLong(DownloadWorker.KEY_DURATION_SECONDS, 0L),
+                "bytesReceived" to wi.outputData.getLong(DownloadWorker.KEY_BYTES_RECEIVED, 0L),
+            )
+            WorkInfo.State.FAILED -> mapOf(
+                "type" to "failed",
+                "videoId" to videoId,
+                "message" to (wi.outputData.getString(DownloadWorker.KEY_ERROR) ?: "Download failed"),
+            )
+            WorkInfo.State.CANCELLED -> mapOf(
+                "type" to "failed",
+                "videoId" to videoId,
+                "message" to "Cancelled",
+            )
+        }
+        sink.success(payload)
+    }
+
+    private fun resolveYoutube(url: String): Map<String, Any?> {
+        val r = YoutubeResolver.resolve(url)
+        return mapOf(
+            "videoId" to r.videoId,
+            "title" to r.title,
+            "channel" to r.channel,
+            "durationSeconds" to r.durationSeconds,
+            "audioUrl" to r.audioUrl,
+            "averageBitrate" to r.averageBitrate,
+            "mimeType" to r.mimeType,
+            "extension" to r.extension,
+            "thumbnailUrl" to r.thumbnailUrl,
+        )
+    }
+
+    companion object {
+        const val TAG_PREFIX = "podcastr.download:"
     }
 }

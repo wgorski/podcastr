@@ -4,14 +4,14 @@ import 'package:flutter/services.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
+import 'package:permission_handler/permission_handler.dart';
+
 import 'models/track.dart';
 import 'screens/download_sheet.dart';
 import 'screens/library_screen.dart';
 import 'screens/lock_screen.dart';
 import 'screens/now_playing_screen.dart';
 import 'screens/search_screen.dart';
-import 'services/download_notifier.dart';
-import 'services/youtube_downloader.dart';
 import 'state/audio_controller.dart';
 import 'state/download_manager.dart';
 import 'state/library_store.dart';
@@ -116,11 +116,19 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   @override
   void initState() {
     super.initState();
-    DownloadActionRouter.instance
-      ..bind()
-      ..onCancel = _cancelDownloadFromNotification;
+    _requestNotificationPermission();
     _load();
     _wireShareIntent();
+  }
+
+  Future<void> _requestNotificationPermission() async {
+    // Android 13+: required so the download foreground service can post
+    // its progress notification. Silently best-effort — if denied, the
+    // download still runs (the worker handles a denied permission by
+    // emitting a failure that the UI surfaces).
+    try {
+      await Permission.notification.request();
+    } catch (_) {/* already in flight or unsupported */}
   }
 
   Future<void> _load() async {
@@ -138,6 +146,17 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     }
     if (firstReady != null) {
       await _audio.load(firstReady);
+    }
+    // Re-attach to any downloads that were in flight when the app was
+    // killed. Native side checks WorkManager state and either resumes
+    // observing or surfaces a final completed / failed event.
+    final inFlight = tracks
+        .where((t) =>
+            t.status == TrackStatus.downloading ||
+            t.status == TrackStatus.queued)
+        .toList();
+    if (inFlight.isNotEmpty) {
+      await _downloads.reconnect(inFlight);
     }
   }
 
@@ -178,7 +197,6 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   void dispose() {
     _sleepTicker?.cancel();
     _intentSub?.cancel();
-    DownloadActionRouter.instance.unbind();
     _downloads.dispose();
     _audio.dispose();
     super.dispose();
@@ -288,12 +306,12 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     await _persist();
   }
 
-  Future<void> _onStartDownload(Track downloading, ResolvedVideo resolved) async {
+  Future<void> _onStartDownload(Track downloading) async {
     // Kick off the download FIRST. start()'s synchronous prefix inserts the
     // per-track ValueNotifier into DownloadManager._active before any await,
     // which means the library card subscribes to a live notifier on its
     // first build rather than the static empty one.
-    final downloadFuture = _downloads.start(downloading, resolved);
+    final downloadFuture = _downloads.start(downloading);
     setState(() {
       _tracks = [downloading, ..._tracks];
       _screen = _Screen.library;
@@ -354,11 +372,6 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     await _downloads.cancel(trackId);
   }
 
-  void _cancelDownloadFromNotification(String trackId) {
-    // Routed from the notification action; bounce to the manager.
-    _downloads.cancel(trackId);
-  }
-
   Future<void> _retryDownload(Track failed) async {
     if (failed.sourceUrl == null) return;
     final downloading = failed.copyWith(
@@ -366,7 +379,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
       clearErrorMessage: true,
     );
     // See _onStartDownload re: ordering.
-    final retryFuture = _downloads.resolveAndStart(downloading);
+    final retryFuture = _downloads.retry(downloading);
     setState(() {
       _tracks = [
         for (final t in _tracks) t.id == failed.id ? downloading : t,
