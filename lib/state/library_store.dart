@@ -17,14 +17,15 @@ class LibraryStore {
     try {
       final list = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
       final tracks = list.map(Track.fromJson).toList();
-      // Any entry left in `downloading` is a zombie from a previous run
-      // (the in-process DownloadManager can't survive app death). Drop the
-      // row and best-effort-delete its partial files. Persist immediately
-      // so the next read is clean.
+      // Any entry left in `downloading` or `queued` is a zombie from a
+      // previous run (the in-process DownloadManager can't survive app
+      // death). Drop the row and best-effort-delete its partial files.
+      // Persist immediately so the next read is clean.
       final survivors = <Track>[];
       var purgedAny = false;
       for (final t in tracks) {
-        if (t.status == TrackStatus.downloading) {
+        if (t.status == TrackStatus.downloading ||
+            t.status == TrackStatus.queued) {
           await deleteFileFor(t);
           purgedAny = true;
         } else {

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Notification icons are looked up from native code by string name
+  (getResources().getIdentifier(...) in audio_service and
+  flutter_local_notifications), so the resource shrinker can't see the
+  reference and strips them in release builds. That leaves
+  setSmallIcon(0) inside audio_service's buildNotification(), which
+  collapses the playback notification to a bare foreground stub: no
+  MediaStyle, no transport actions, no color, no "ongoing" flag — just
+  the channel ID.
+
+  Keeping all drawables is the same workaround the audio_service
+  example app ships and the one the plugin's README recommends.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/*,@mipmap/*" />

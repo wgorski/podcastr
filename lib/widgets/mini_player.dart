@@ -12,7 +12,6 @@ class MiniPlayer extends StatelessWidget {
   final double progress;
   final VoidCallback onTogglePlay;
   final VoidCallback onExpand;
-  final VoidCallback onNext;
   const MiniPlayer({
     super.key,
     required this.track,
@@ -20,7 +19,6 @@ class MiniPlayer extends StatelessWidget {
     required this.progress,
     required this.onTogglePlay,
     required this.onExpand,
-    required this.onNext,
   });
 
   @override
@@ -92,12 +90,6 @@ class MiniPlayer extends StatelessWidget {
                         ),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
-                      ),
-                      IconButton(
-                        onPressed: onNext,
-                        icon: const Icon(Icons.skip_next_rounded, size: 20, color: AuroraTheme.muted),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                       ),
                     ],
                   ),

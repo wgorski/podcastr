@@ -73,27 +73,67 @@ class YoutubeDownloader {
   }
 
   /// Streams the audio stream URL to a file under the app's documents dir.
+  ///
+  /// Range-chunked: instead of one long-lived GET, this issues a sequence of
+  /// `Range: bytes=N-M` requests of [_chunkSize] each. googlevideo aborts
+  /// older long-lived streams when a newer one opens from the same client
+  /// IP, so multiple parallel "full-file" GETs cancel each other out. Short
+  /// Range requests are how YouTube's own player downloads, and several can
+  /// coexist on one client without the server killing them. If the server
+  /// returns 200 instead of 206 (Range not honored), we fall back to a
+  /// single full stream for this download — better to finish slowly than to
+  /// fail.
   Stream<DownloadProgress> download(ResolvedVideo v, {required String filePath}) async* {
-    final req = http.Request('GET', Uri.parse(v.audioUrl));
-    final res = await req.send();
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw YoutubeException('Audio stream returned HTTP ${res.statusCode}.');
-    }
-    final total = res.contentLength ?? -1;
+    final client = http.Client();
     final file = File(filePath);
     final sink = file.openWrite();
     var received = 0;
+    var totalBytes = -1;
     try {
-      await for (final chunk in res.stream) {
-        sink.add(chunk);
-        received += chunk.length;
-        yield DownloadProgress(received, total);
+      while (totalBytes < 0 || received < totalBytes) {
+        final endByte = received + _chunkSize - 1;
+        final req = http.Request('GET', Uri.parse(v.audioUrl));
+        req.headers['Range'] = 'bytes=$received-$endByte';
+        final res = await client.send(req);
+        if (res.statusCode == 200) {
+          totalBytes = res.contentLength ?? -1;
+          await for (final chunk in res.stream) {
+            sink.add(chunk);
+            received += chunk.length;
+            yield DownloadProgress(received, totalBytes);
+          }
+          break;
+        }
+        if (res.statusCode != 206) {
+          throw YoutubeException('Audio stream returned HTTP ${res.statusCode}.');
+        }
+        if (totalBytes < 0) {
+          final cr = res.headers['content-range'];
+          if (cr != null) {
+            final slash = cr.indexOf('/');
+            if (slash > 0) {
+              totalBytes = int.tryParse(cr.substring(slash + 1).trim()) ?? -1;
+            }
+          }
+        }
+        var chunkBytes = 0;
+        await for (final chunk in res.stream) {
+          sink.add(chunk);
+          received += chunk.length;
+          chunkBytes += chunk.length;
+          yield DownloadProgress(received, totalBytes);
+        }
+        if (chunkBytes == 0) break;
+        if (totalBytes < 0) break;
       }
       await sink.flush();
     } finally {
       await sink.close();
+      client.close();
     }
   }
+
+  static const _chunkSize = 2 * 1024 * 1024;
 
   /// Computed destination path for a given video ID + container.
   static Future<String> filePathFor(ResolvedVideo v) async {

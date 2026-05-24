@@ -83,7 +83,9 @@ class NowPlayingScreen extends StatelessWidget {
             const SizedBox(height: 4),
             Expanded(
               child: SingleChildScrollView(
-                physics: const NeverScrollableScrollPhysics(),
+                physics: track.status == TrackStatus.failed
+                    ? const ClampingScrollPhysics()
+                    : const NeverScrollableScrollPhysics(),
                 child: _BodyForStatus(
                   track: track,
                   playing: playing,
@@ -127,6 +129,7 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     final label = switch (track.status) {
       TrackStatus.downloading => 'DOWNLOADING',
+      TrackStatus.queued => 'QUEUED',
       TrackStatus.failed => 'DOWNLOAD FAILED',
       TrackStatus.ready => 'NOW PLAYING',
     };
@@ -282,6 +285,8 @@ class _BodyForStatus extends StatelessWidget {
           progress: downloadProgress ?? const _NullProgress(),
           onCancel: onCancelDownload,
         );
+      case TrackStatus.queued:
+        return _QueuedBody(onCancel: onCancelDownload);
       case TrackStatus.failed:
         return _FailedBody(
           errorMessage: track.errorMessage ?? 'Unknown error',
@@ -388,6 +393,56 @@ class _ReadyBody extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _QueuedBody extends StatelessWidget {
+  final VoidCallback? onCancel;
+  const _QueuedBody({required this.onCancel});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(26, 18, 26, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.schedule_rounded, size: 18, color: AuroraTheme.muted),
+              const SizedBox(width: 8),
+              Text(
+                'Waiting for another download to finish.',
+                style: AuroraTheme.body(size: 13, color: AuroraTheme.muted, height: 1.4),
+              ),
+            ],
+          ),
+          const SizedBox(height: 22),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: onCancel,
+              icon: const Icon(Icons.stop_circle_outlined,
+                  size: 18, color: Color(0xFFFF6E80)),
+              label: Text(
+                'Cancel',
+                style: AuroraTheme.body(
+                  size: 14,
+                  weight: FontWeight.w700,
+                  color: const Color(0xFFFF6E80),
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                side: const BorderSide(color: Color(0x66FF6E80)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                backgroundColor: const Color(0x14FF6E80),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

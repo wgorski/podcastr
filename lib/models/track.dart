@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
-enum TrackStatus { ready, downloading, failed }
+enum TrackStatus { ready, downloading, queued, failed }
 
 class Track {
   final String id;

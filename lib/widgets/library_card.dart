@@ -147,6 +147,22 @@ class _MetaRow extends StatelessWidget {
         ],
       );
     }
+    if (track.status == TrackStatus.queued) {
+      return Row(
+        children: [
+          const Icon(Icons.schedule_rounded, size: 14, color: AuroraTheme.muted),
+          const SizedBox(width: 6),
+          Text(
+            'Queued',
+            style: AuroraTheme.body(
+              size: 12,
+              weight: FontWeight.w600,
+              color: AuroraTheme.muted,
+            ),
+          ),
+        ],
+      );
+    }
     return Row(
       children: [
         Text(
@@ -253,11 +269,29 @@ class _StatusBadge extends StatelessWidget {
     switch (track.status) {
       case TrackStatus.downloading:
         return _DownloadingIndicator();
+      case TrackStatus.queued:
+        return _QueuedBadge();
       case TrackStatus.failed:
         return _FailedBadge();
       case TrackStatus.ready:
         return _PlayButton(isPlaying: isPlaying, onPlay: onPlay);
     }
+  }
+}
+
+class _QueuedBadge extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        shape: BoxShape.circle,
+        border: Border.all(color: AuroraTheme.border, width: 1),
+      ),
+      child: const Icon(Icons.schedule_rounded, size: 18, color: AuroraTheme.muted),
+    );
   }
 }
 

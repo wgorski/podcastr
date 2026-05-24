@@ -109,28 +109,20 @@ class DownloadNotifier {
     await _plugin.show(id, title, channel, details, payload: payload);
   }
 
-  /// Replace the progress notification with a final "Saved" line.
+  /// Dismiss the progress notification once the download finishes.
+  ///
+  /// We don't post a "Saved · …" completion notification — keeping it
+  /// around triggers Android's auto-group summary ("Podcastr is running"
+  /// aggregate) the moment a second download starts. The in-app library
+  /// row is the source of truth for completion; matches Spotify's
+  /// notification flow where the media notification is the only one.
   Future<void> complete({
     required int id,
     required String title,
     required String channel,
   }) async {
-    await _ensureInitialized();
     _lastPercent.remove(id);
-    const details = NotificationDetails(
-      android: AndroidNotificationDetails(
-        _channelId,
-        _channelName,
-        channelDescription: _channelDescription,
-        importance: Importance.low,
-        priority: Priority.low,
-        autoCancel: true,
-        ongoing: false,
-        category: AndroidNotificationCategory.progress,
-        showWhen: true,
-      ),
-    );
-    await _plugin.show(id, 'Saved · $title', channel, details);
+    await _plugin.cancel(id);
   }
 
   /// Drop the notification on cancel / error.

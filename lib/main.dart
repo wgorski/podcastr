@@ -89,6 +89,8 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   late final DownloadManager _downloads = DownloadManager(
     onCompleted: _onDownloadCompleted,
     onFailed: _onDownloadFailed,
+    onQueued: (id) => _setStatus(id, TrackStatus.queued),
+    onDequeued: (id) => _setStatus(id, TrackStatus.downloading),
   );
 
   List<Track> _tracks = const [];
@@ -232,14 +234,6 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     await _audio.setSpeed(next);
   }
 
-  Future<void> _nextTrack() async {
-    final ready = _tracks.where((t) => t.status == TrackStatus.ready).toList();
-    if (ready.isEmpty) return;
-    final i = ready.indexWhere((t) => t.id == _current?.id);
-    final next = ready[(i + 1) % ready.length];
-    await _selectTrack(next, startPlaying: true);
-  }
-
   Future<void> _deleteTrack(Track t) async {
     // Stop any in-flight download for this id; abort doesn't fire onFailed.
     if (_downloads.isActive(t.id)) {
@@ -299,6 +293,19 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
       await _audio.load(ready);
     }
     await _persist();
+  }
+
+  void _setStatus(String trackId, TrackStatus status) {
+    if (!mounted) return;
+    setState(() {
+      _tracks = [
+        for (final t in _tracks)
+          t.id == trackId ? t.copyWith(status: status, clearErrorMessage: true) : t,
+      ];
+      if (_viewedTrack?.id == trackId) {
+        _viewedTrack = _viewedTrack!.copyWith(status: status, clearErrorMessage: true);
+      }
+    });
   }
 
   Future<void> _onDownloadFailed(String trackId, String message) async {
@@ -386,7 +393,6 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                       _screen = _Screen.player;
                     });
                   },
-                  onNext: _nextTrack,
                 ),
               ),
             if (viewed != null && _screen == _Screen.player)
@@ -457,6 +463,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
               ),
             if (_screen == _Screen.download && _pendingDownloadUrl != null)
               DownloadSheet(
+                key: ValueKey(_pendingDownloadUrl),
                 url: _pendingDownloadUrl!,
                 onClose: () => setState(() {
                   _screen = _Screen.library;

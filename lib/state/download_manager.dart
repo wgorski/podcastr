@@ -17,8 +17,22 @@ class DownloadManager {
   final DownloadNotifier _notifier;
   final void Function(Track readyTrack) onCompleted;
   final void Function(String trackId, String errorMessage) onFailed;
+  /// Fires when a `start()` request is held back behind another download.
+  /// The UI flips that track to [TrackStatus.queued].
+  final void Function(String trackId)? onQueued;
+  /// Fires when a queued request comes off the queue and actually begins.
+  /// The UI flips that track back to [TrackStatus.downloading].
+  final void Function(String trackId)? onDequeued;
 
+  // Up to [_maxConcurrent] downloads run in parallel. googlevideo aborts
+  // older long-lived streams when a newer one opens from the same client,
+  // so [YoutubeDownloader.download] uses short Range-chunked requests
+  // instead of a single long GET — that lets multiple downloads coexist
+  // without the server killing the older one. Additional requests beyond
+  // the cap sit in [_queue] until a slot frees up.
+  static const _maxConcurrent = 3;
   final Map<String, _ActiveDownload> _active = {};
+  final List<_Pending> _queue = [];
   // Stable per-track progress notifier — survives across attempts and is
   // created on the first lookup. This decouples "is there a live download
   // right now" from "is something subscribed to the progress" so the
@@ -28,12 +42,16 @@ class DownloadManager {
   DownloadManager({
     required this.onCompleted,
     required this.onFailed,
+    this.onQueued,
+    this.onDequeued,
     YoutubeDownloader? downloader,
     DownloadNotifier? notifier,
   })  : _downloader = downloader ?? YoutubeDownloader(),
         _notifier = notifier ?? DownloadNotifier();
 
   bool isActive(String trackId) => _active.containsKey(trackId);
+  bool isQueued(String trackId) =>
+      _queue.any((p) => p.track.id == trackId);
 
   /// A listenable that always reflects current progress for [trackId].
   /// Returns the same instance across calls so subscribers stay attached
@@ -44,16 +62,27 @@ class DownloadManager {
   ValueNotifier<DownloadProgress?> _notifierFor(String trackId) =>
       _progress.putIfAbsent(trackId, () => ValueNotifier<DownloadProgress?>(null));
 
-  /// Begin streaming bytes for [track]. The track must already carry
-  /// `filePath` (the destination on disk) and `status == downloading`. The
-  /// row should already be in the library before this is called.
+  /// Schedule a download for [track]. If no other download is in flight,
+  /// it starts immediately; otherwise it joins the back of the queue and
+  /// the row is flipped to [TrackStatus.queued] via [onQueued]. The track
+  /// must already carry `filePath` (the destination on disk) and the row
+  /// should already be in the library before this is called.
   Future<void> start(Track track, ResolvedVideo resolved) async {
-    if (_active.containsKey(track.id)) return;
+    if (_active.containsKey(track.id) || isQueued(track.id)) return;
     final filePath = track.filePath;
     if (filePath == null) {
       onFailed(track.id, 'Internal: missing filePath for download.');
       return;
     }
+    if (_active.length >= _maxConcurrent) {
+      _queue.add(_Pending(track, resolved));
+      onQueued?.call(track.id);
+      return;
+    }
+    await _startNow(track, resolved, filePath);
+  }
+
+  Future<void> _startNow(Track track, ResolvedVideo resolved, String filePath) async {
     final notificationId = _notificationIdFor(track.id);
     final progress = _notifierFor(track.id);
     // Reset to "starting" so a previous failed attempt's last value isn't
@@ -90,7 +119,7 @@ class DownloadManager {
         );
       },
       onError: (Object e) {
-        _finalizeFailed(track.id, e.toString());
+        _finalizeFailed(track.id, _shortenError(e));
       },
       onDone: () async {
         final lastP = progress.value;
@@ -117,31 +146,59 @@ class DownloadManager {
         );
         _cleanup(track.id);
         onCompleted(readyTrack);
+        _drainQueue();
       },
     );
   }
 
-  /// Cancel the active download for [trackId]. Marks the track as failed
-  /// via the [onFailed] callback so the row stays in the library and the
-  /// user can retry.
-  Future<void> cancel(String trackId) async {
-    if (!_active.containsKey(trackId)) return;
-    await _finalizeFailed(trackId, 'Cancelled');
+  /// Pull pending requests off the queue until [_maxConcurrent] is hit or
+  /// the queue is empty.
+  void _drainQueue() {
+    while (_active.length < _maxConcurrent && _queue.isNotEmpty) {
+      final next = _queue.removeAt(0);
+      final filePath = next.track.filePath;
+      if (filePath == null) {
+        onFailed(next.track.id, 'Internal: missing filePath for download.');
+        continue;
+      }
+      onDequeued?.call(next.track.id);
+      // Fire-and-forget — we don't want callers awaiting an arbitrary chain.
+      unawaited(_startNow(next.track, next.resolved, filePath));
+    }
   }
 
-  /// Remove the active download entirely (e.g., when the user deletes the
-  /// row outright). Unlike [cancel], this does NOT fire [onFailed].
-  /// Also drops the cached progress notifier — the track is gone for good.
+  /// Cancel the active or queued download for [trackId]. Marks the track
+  /// as failed via the [onFailed] callback so the row stays in the library
+  /// and the user can retry.
+  Future<void> cancel(String trackId) async {
+    if (_active.containsKey(trackId)) {
+      await _finalizeFailed(trackId, 'Cancelled');
+      return;
+    }
+    final qi = _queue.indexWhere((p) => p.track.id == trackId);
+    if (qi >= 0) {
+      _queue.removeAt(qi);
+      onFailed(trackId, 'Cancelled');
+    }
+  }
+
+  /// Remove the active or queued download entirely (e.g., when the user
+  /// deletes the row outright). Unlike [cancel], this does NOT fire
+  /// [onFailed]. Also drops the cached progress notifier — the track is
+  /// gone for good.
   Future<void> abort(String trackId) async {
+    _queue.removeWhere((p) => p.track.id == trackId);
     final entry = _active.remove(trackId);
     if (entry == null) {
       _progress.remove(trackId)?.dispose();
+      _drainQueue();
       return;
     }
     await entry.subscription?.cancel();
     await _notifier.cancel(entry.notificationId);
     await _deletePartial(entry.filePath);
     _progress.remove(trackId)?.dispose();
+    _drainQueue();
   }
 
   Future<void> _finalizeFailed(String trackId, String message) async {
@@ -154,6 +211,7 @@ class DownloadManager {
     // Keep the progress notifier alive — the user may retry, and the
     // library card may still be subscribed.
     onFailed(trackId, message);
+    _drainQueue();
   }
 
   Future<void> _deletePartial(String? path) async {
@@ -189,8 +247,25 @@ class DownloadManager {
       final resolved = await _downloader.resolve(url);
       await start(downloadingTrack, resolved);
     } catch (e) {
-      onFailed(downloadingTrack.id, e.toString());
+      onFailed(downloadingTrack.id, _shortenError(e));
     }
+  }
+
+  // Trim noise out of network error messages so the failed-download UI
+  // doesn't show a multi-line googlevideo.com URL. We keep the human part
+  // of the message and drop the class prefix and the `, uri=…` suffix.
+  static String _shortenError(Object e) {
+    var s = e.toString();
+    // "ClientException: foo" → "foo"
+    final colon = s.indexOf(': ');
+    if (colon > 0 && colon < 40 && !s.substring(0, colon).contains(' ')) {
+      s = s.substring(colon + 2);
+    }
+    // Strip everything from ", uri=" onwards (googlevideo.com URLs are
+    // hundreds of characters of query string).
+    final uriIdx = s.indexOf(', uri=');
+    if (uriIdx > 0) s = s.substring(0, uriIdx);
+    return s.trim();
   }
 
   void dispose() {
@@ -215,4 +290,10 @@ class _ActiveDownload {
     required this.notificationId,
     required this.filePath,
   });
+}
+
+class _Pending {
+  final Track track;
+  final ResolvedVideo resolved;
+  _Pending(this.track, this.resolved);
 }
