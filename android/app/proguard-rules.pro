@@ -6,6 +6,27 @@
 # We also keep the extraction-stack classes themselves because NewPipe's
 # parsers and Rhino's JS evaluator rely on reflection internally.
 
+# --- WorkManager + Room ---
+# WorkManager backs the foreground download worker. Its androidx.work.impl
+# code path resolves WorkDatabase via Room, which looks up `<Database>_Impl`
+# by canonical class name. R8 rewrites those names by default, crashing
+# the app on first launch with "Failed to create an instance of class
+# androidx.work.impl.WorkDatabase.canonicalName" before MainActivity ever
+# runs.
+-keep class androidx.work.** { *; }
+-keep interface androidx.work.** { *; }
+-keep class androidx.work.impl.WorkDatabase { *; }
+-keep class androidx.work.impl.WorkDatabase_Impl { *; }
+-keep class * extends androidx.room.RoomDatabase
+-keep class androidx.room.RoomDatabase { *; }
+-keep @androidx.room.Database class * { *; }
+-dontwarn androidx.work.**
+
+# Our own foreground worker is constructed reflectively by WorkManager.
+-keep class com.wgorski.podcastr.DownloadWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
+
 # --- audio_service / just_audio_background ---
 # The MediaSession callbacks and MediaButtonReceiver are wired up via
 # reflection; without these keep rules, the playback notification's

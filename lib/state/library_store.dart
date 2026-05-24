@@ -46,7 +46,7 @@ class LibraryStore {
 
   /// Best-effort: remove the audio file and thumbnail. Missing files are ignored.
   Future<void> deleteFileFor(Track t) async {
-    for (final path in [t.filePath, t.thumbnailPath]) {
+    for (final path in [t.filePath, t.thumbnailPath, t.subtitlePath]) {
       if (path == null) continue;
       final f = File(path);
       if (await f.exists()) {

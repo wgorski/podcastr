@@ -463,6 +463,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                           track: fresh,
                           playing: isReady ? _playing : false,
                           progress: isReady ? _progress : 0.0,
+                          position: isReady ? _audio.position : Duration.zero,
                           speed: _speed,
                           sleepRemaining: _sleepRemaining,
                           onTogglePlay: _audio.toggle,
