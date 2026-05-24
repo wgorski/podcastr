@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 import '../models/track.dart';
 import '../services/youtube_downloader.dart';
 import '../theme/aurora_theme.dart';
@@ -73,6 +74,7 @@ class NowPlayingScreen extends StatelessWidget {
               track: track,
               onClose: onClose,
               onDelete: () => _confirmDelete(context),
+              onShare: () => Share.share(track.shareUrl, subject: track.title),
             ),
             _Artwork(
               track: track,
@@ -123,7 +125,13 @@ class _Header extends StatelessWidget {
   final Track track;
   final VoidCallback onClose;
   final VoidCallback onDelete;
-  const _Header({required this.track, required this.onClose, required this.onDelete});
+  final VoidCallback onShare;
+  const _Header({
+    required this.track,
+    required this.onClose,
+    required this.onDelete,
+    required this.onShare,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -160,7 +168,7 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
-          _MoreMenu(onDelete: onDelete),
+          _MoreMenu(onDelete: onDelete, onShare: onShare),
         ],
       ),
     );
@@ -860,7 +868,8 @@ class _SleepTimerSheet extends StatelessWidget {
 
 class _MoreMenu extends StatelessWidget {
   final VoidCallback onDelete;
-  const _MoreMenu({required this.onDelete});
+  final VoidCallback onShare;
+  const _MoreMenu({required this.onDelete, required this.onShare});
 
   @override
   Widget build(BuildContext context) {
@@ -873,9 +882,21 @@ class _MoreMenu extends StatelessWidget {
       ),
       offset: const Offset(0, 40),
       onSelected: (v) {
+        if (v == 'share') onShare();
         if (v == 'delete') onDelete();
       },
       itemBuilder: (ctx) => [
+        PopupMenuItem(
+          value: 'share',
+          child: Row(
+            children: [
+              const Icon(Icons.ios_share_rounded, size: 18, color: AuroraTheme.text),
+              const SizedBox(width: 10),
+              Text('Share',
+                  style: AuroraTheme.body(size: 14, weight: FontWeight.w600)),
+            ],
+          ),
+        ),
         PopupMenuItem(
           value: 'delete',
           child: Row(

@@ -52,6 +52,11 @@ class Track {
     return first * last;
   }
 
+  /// URL to share back to the original YouTube video. Falls back to a
+  /// reconstructed `youtu.be/<id>` for tracks persisted before [sourceUrl]
+  /// was captured.
+  String get shareUrl => sourceUrl ?? 'https://youtu.be/$id';
+
   Track copyWith({
     String? id,
     String? size,

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 import '../models/track.dart';
 import '../services/youtube_downloader.dart';
 import '../theme/aurora_theme.dart';
@@ -37,13 +38,22 @@ class LibraryScreen extends StatefulWidget {
 }
 
 class _LibraryScreenState extends State<LibraryScreen> {
-  Future<void> _confirmDelete(Track t) async {
-    final result = await showModalBottomSheet<bool>(
+  Future<void> _showActions(Track t) async {
+    final result = await showModalBottomSheet<_TrackAction>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => _DeleteSheet(track: t),
+      builder: (ctx) => _TrackActionsSheet(track: t),
     );
-    if (result == true) widget.onDelete(t);
+    switch (result) {
+      case _TrackAction.share:
+        await Share.share(t.shareUrl, subject: t.title);
+        break;
+      case _TrackAction.delete:
+        widget.onDelete(t);
+        break;
+      case null:
+        break;
+    }
   }
 
   Future<void> _confirmClearFinished(int count) async {
@@ -148,7 +158,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     isPlaying: widget.currentId == t.id && widget.playing,
                     onOpen: () => widget.onOpenTrack(t),
                     onPlay: () => widget.onPlay(t),
-                    onLongPress: () => _confirmDelete(t),
+                    onLongPress: () => _showActions(t),
                     downloadProgress: t.status == TrackStatus.downloading
                         ? widget.downloadProgressFor?.call(t.id)
                         : null,
@@ -205,9 +215,11 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-class _DeleteSheet extends StatelessWidget {
+enum _TrackAction { share, delete }
+
+class _TrackActionsSheet extends StatelessWidget {
   final Track track;
-  const _DeleteSheet({required this.track});
+  const _TrackActionsSheet({required this.track});
 
   @override
   Widget build(BuildContext context) {
@@ -234,16 +246,22 @@ class _DeleteSheet extends StatelessWidget {
             Text(track.channel, style: AuroraTheme.body(size: 12, color: AuroraTheme.muted)),
             const SizedBox(height: 16),
             _ActionRow(
+              icon: Icons.ios_share_rounded,
+              label: 'Share',
+              onTap: () => Navigator.of(context).pop(_TrackAction.share),
+            ),
+            const SizedBox(height: 4),
+            _ActionRow(
               icon: Icons.delete_outline_rounded,
               label: 'Delete from library',
               destructive: true,
-              onTap: () => Navigator.of(context).pop(true),
+              onTap: () => Navigator.of(context).pop(_TrackAction.delete),
             ),
             const SizedBox(height: 4),
             _ActionRow(
               icon: Icons.close_rounded,
               label: 'Cancel',
-              onTap: () => Navigator.of(context).pop(false),
+              onTap: () => Navigator.of(context).pop(),
             ),
           ],
         ),
