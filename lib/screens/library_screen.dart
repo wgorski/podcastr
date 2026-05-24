@@ -257,12 +257,6 @@ class _TrackActionsSheet extends StatelessWidget {
               destructive: true,
               onTap: () => Navigator.of(context).pop(_TrackAction.delete),
             ),
-            const SizedBox(height: 4),
-            _ActionRow(
-              icon: Icons.close_rounded,
-              label: 'Cancel',
-              onTap: () => Navigator.of(context).pop(),
-            ),
           ],
         ),
       ),
