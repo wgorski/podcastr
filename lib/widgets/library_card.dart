@@ -89,7 +89,10 @@ class LibraryCard extends StatelessWidget {
                     Positioned(
                       left: 10,
                       top: 10,
-                      child: EqualizerBadge(playing: isPlaying),
+                      child: EqualizerBadge(
+                        playing: isPlaying,
+                        finished: track.finished,
+                      ),
                     ),
                   Positioned(
                     right: 10,

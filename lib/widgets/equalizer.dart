@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import '../theme/aurora_theme.dart';
 
-/// Three bars rising/falling out of phase + a "PLAYING / PAUSED" label.
-/// Mirrors the equalizer1/2/3 keyframes in index.html.
+/// Three bars rising/falling out of phase + a "PLAYING / FINISHED / PAUSED"
+/// label. Mirrors the equalizer1/2/3 keyframes in index.html.
 class EqualizerBadge extends StatefulWidget {
   final bool playing;
-  const EqualizerBadge({super.key, required this.playing});
+  final bool finished;
+  const EqualizerBadge({
+    super.key,
+    required this.playing,
+    this.finished = false,
+  });
 
   @override
   State<EqualizerBadge> createState() => _EqualizerBadgeState();
@@ -43,7 +48,9 @@ class _EqualizerBadgeState extends State<EqualizerBadge> with SingleTickerProvid
           _Bar(c: _c, kind: 3, playing: widget.playing),
           const SizedBox(width: 5),
           Text(
-            widget.playing ? 'PLAYING' : 'PAUSED',
+            widget.playing
+                ? 'PLAYING'
+                : (widget.finished ? 'FINISHED' : 'PAUSED'),
             style: AuroraTheme.body(size: 10, weight: FontWeight.w700, color: AuroraTheme.accent, letterSpacing: 0.5),
           ),
         ],
