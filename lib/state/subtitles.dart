@@ -83,7 +83,8 @@ Subtitles parseVtt(String input) {
     i++;
     final buf = StringBuffer();
     while (i < lines.length && lines[i].trim().isNotEmpty) {
-      final cleaned = lines[i].replaceAll(_inlineTag, '').trim();
+      final cleaned =
+          _decodeEntities(lines[i].replaceAll(_inlineTag, '')).trim();
       if (cleaned.isNotEmpty) {
         if (buf.isNotEmpty) buf.write(' ');
         buf.write(cleaned);
@@ -145,6 +146,39 @@ int _longestSuffixPrefixOverlap(String a, String b) {
     if (a.endsWith(b.substring(0, len))) return len;
   }
   return 0;
+}
+
+/// WebVTT requires `&`, `<`, `>` to be entity-encoded, and many YouTube
+/// captions also emit `&#39;` / `&quot;` / numeric `&#NNN;` for apostrophes
+/// and quotes. Decode the handful that show up in practice so cues read as
+/// natural text.
+const Map<String, String> _namedEntities = {
+  'amp': '&',
+  'lt': '<',
+  'gt': '>',
+  'quot': '"',
+  'apos': "'",
+  'nbsp': ' ',
+};
+
+final RegExp _entityPattern = RegExp(r'&(#x[0-9A-Fa-f]+|#[0-9]+|[A-Za-z]+);');
+
+String _decodeEntities(String input) {
+  if (!input.contains('&')) return input;
+  return input.replaceAllMapped(_entityPattern, (m) {
+    final body = m.group(1)!;
+    if (body.startsWith('#x') || body.startsWith('#X')) {
+      final code = int.tryParse(body.substring(2), radix: 16);
+      if (code != null) return String.fromCharCode(code);
+    } else if (body.startsWith('#')) {
+      final code = int.tryParse(body.substring(1));
+      if (code != null) return String.fromCharCode(code);
+    } else {
+      final mapped = _namedEntities[body];
+      if (mapped != null) return mapped;
+    }
+    return m.group(0)!;
+  });
 }
 
 Duration _parseTimestamp(String? hourGroup, String mins, String secs, String ms) {
