@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Adaptive launcher icon background (brand ink-2 from logo.html). -->
+    <color name="ic_launcher_background">#15100F</color>
+</resources>

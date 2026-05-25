@@ -5,6 +5,7 @@ import '../models/track.dart';
 import '../services/youtube_downloader.dart';
 import '../theme/aurora_theme.dart';
 import '../widgets/library_card.dart';
+import '../widgets/sonar_mark.dart';
 
 class LibraryScreen extends StatefulWidget {
   final List<Track> tracks;
@@ -110,25 +111,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
             padding: const EdgeInsets.fromLTRB(18, 6, 18, 6),
             child: Row(
               children: [
-                Container(
-                  width: 26,
-                  height: 26,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
-                    gradient: AuroraTheme.accentGradient,
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    'P',
-                    style: AuroraTheme.display(
-                      size: 15,
-                      weight: FontWeight.w700,
-                      color: AuroraTheme.onAccent,
-                      letterSpacing: -0.5,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 9),
+                const SonarMark(size: 26),
+                const SizedBox(width: 10),
                 Text('Podcastr', style: AuroraTheme.body(size: 17, weight: FontWeight.w700, letterSpacing: -0.3)),
                 const Spacer(),
                 IconButton(

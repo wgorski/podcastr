@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!--
+    Source SVG used to generate legacy mipmap-{m,h,xh,xxh,xxxh}dpi PNGs.
+    Modern Android (API 26+) renders the adaptive icon from
+    drawable/ic_launcher_foreground.xml on top of @color/ic_launcher_background.
+  -->
+  <rect width="200" height="200" rx="44" fill="#15100F"/>
+  <g transform="translate(38, 38) scale(0.62)">
+    <path d="M 40 120 A 40 40 0 0 1 80 160" fill="none" stroke="#F5F1EC" stroke-width="18" stroke-linecap="round"/>
+    <path d="M 40 80 A 80 80 0 0 1 120 160" fill="none" stroke="#F5F1EC" stroke-width="18" stroke-linecap="round" opacity="0.75"/>
+    <path d="M 40 40 A 120 120 0 0 1 160 160" fill="none" stroke="#F5F1EC" stroke-width="18" stroke-linecap="round" opacity="0.45"/>
+    <circle cx="40" cy="160" r="18" fill="#E8845A"/>
+  </g>
+</svg>

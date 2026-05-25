@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Podcastr sonar mark — corner-anchored source dot with three radiating
+  quarter-arcs. Native viewBox 200x200; group scaled to keep the mark
+  inside the adaptive-icon safe zone.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="200"
+    android:viewportHeight="200">
+    <group
+        android:pivotX="100"
+        android:pivotY="100"
+        android:scaleX="0.62"
+        android:scaleY="0.62">
+        <path
+            android:pathData="M 40,120 A 40,40 0 0 1 80,160"
+            android:strokeColor="#F5F1EC"
+            android:strokeWidth="18"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M 40,80 A 80,80 0 0 1 120,160"
+            android:strokeColor="#F5F1EC"
+            android:strokeWidth="18"
+            android:strokeLineCap="round"
+            android:strokeAlpha="0.75" />
+        <path
+            android:pathData="M 40,40 A 120,120 0 0 1 160,160"
+            android:strokeColor="#F5F1EC"
+            android:strokeWidth="18"
+            android:strokeLineCap="round"
+            android:strokeAlpha="0.45" />
+        <path
+            android:pathData="M 22,160 a 18,18 0 0 0 36,0 a 18,18 0 0 0 -36,0 Z"
+            android:fillColor="#E8845A" />
+    </group>
+</vector>
