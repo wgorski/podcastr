@@ -16,6 +16,7 @@ class LibraryScreen extends StatefulWidget {
   final void Function(Track) onDelete;
   final Future<void> Function() onClearFinished;
   final VoidCallback onSearch;
+  final VoidCallback onOpenSettings;
   /// Returns the live progress listenable for a downloading track.
   /// Called only for `TrackStatus.downloading` rows.
   final ValueListenable<DownloadProgress?> Function(String trackId)?
@@ -31,6 +32,7 @@ class LibraryScreen extends StatefulWidget {
     required this.onDelete,
     required this.onClearFinished,
     required this.onSearch,
+    required this.onOpenSettings,
     this.downloadProgressFor,
   });
 
@@ -125,6 +127,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     tooltip: 'Clear finished',
                     icon: const Icon(Icons.delete_sweep_outlined, color: AuroraTheme.text, size: 21),
                   ),
+                IconButton(
+                  onPressed: widget.onOpenSettings,
+                  tooltip: 'Settings',
+                  icon: const Icon(Icons.settings_outlined, color: AuroraTheme.text, size: 21),
+                ),
               ],
             ),
           ),
@@ -188,7 +195,7 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Share a YouTube link to this app from the Android share sheet and the audio will appear here.',
+              'Share a YouTube link or any article URL to this app and it\'ll appear here as audio. Articles use ElevenLabs TTS — add your key in Settings.',
               style: AuroraTheme.body(size: 13, color: AuroraTheme.muted, height: 1.45),
               textAlign: TextAlign.center,
             ),

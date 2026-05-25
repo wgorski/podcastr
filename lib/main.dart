@@ -7,14 +7,18 @@ import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'models/track.dart';
+import 'screens/article_sheet.dart';
 import 'screens/download_sheet.dart';
 import 'screens/library_screen.dart';
 import 'screens/lock_screen.dart';
 import 'screens/now_playing_screen.dart';
 import 'screens/search_screen.dart';
+import 'screens/settings_screen.dart';
+import 'services/article_extractor.dart';
 import 'state/audio_controller.dart';
 import 'state/download_manager.dart';
 import 'state/library_store.dart';
+import 'state/settings_store.dart';
 import 'theme/aurora_theme.dart';
 import 'widgets/mini_player.dart';
 
@@ -70,7 +74,7 @@ class PodcastrApp extends StatelessWidget {
   }
 }
 
-enum _Screen { library, player, search, download, lock }
+enum _Screen { library, player, search, download, article, lock }
 
 class _PodcastrHome extends StatefulWidget {
   const _PodcastrHome();
@@ -102,8 +106,14 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   // failed tracks, which don't get loaded into the audio engine.
   Track? _viewedTrack;
 
-  String? _pendingDownloadUrl; // URL captured from a SEND / VIEW intent
+  String? _pendingDownloadUrl; // YouTube URL captured from a SEND / VIEW intent
+  String? _pendingArticleUrl;  // Non-YouTube URL → article→TTS flow
+  // Bumped whenever we want the ArticleSheet's State to be torn down and
+  // rebuilt (e.g. after the user adds a missing API key in Settings and we
+  // need the sheet to re-evaluate from scratch).
+  int _articleSheetEpoch = 0;
   StreamSubscription<List<SharedMediaFile>>? _intentSub;
+  final _settings = SettingsStore();
 
   // Sleep timer: ticks down regardless of pause state; pauses playback at 0.
   Duration? _sleepRemaining;
@@ -168,27 +178,48 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   }
 
   void _handleSharedMedia(List<SharedMediaFile> items) {
-    final url = _extractYoutubeUrl(items);
+    final url = _extractUrl(items);
     if (url == null) return;
-    setState(() {
-      _pendingDownloadUrl = url;
-      _screen = _Screen.download;
-    });
+    _dispatchSharedUrl(url);
     ReceiveSharingIntent.instance.reset();
   }
 
-  static final _urlRegex = RegExp(
+  /// Route a captured URL to the right sheet. YouTube → existing native
+  /// extraction; anything else → article→TTS flow.
+  void _dispatchSharedUrl(String url) {
+    if (_youtubeUrlRegex.hasMatch(url)) {
+      setState(() {
+        _pendingDownloadUrl = url;
+        _pendingArticleUrl = null;
+        _screen = _Screen.download;
+      });
+    } else {
+      setState(() {
+        _pendingArticleUrl = url;
+        _pendingDownloadUrl = null;
+        _screen = _Screen.article;
+      });
+    }
+  }
+
+  static final _youtubeUrlRegex = RegExp(
     r'https?://(?:www\.|m\.)?(?:youtube\.com|youtu\.be)/\S+',
     caseSensitive: false,
   );
+  static final _anyUrlRegex = RegExp(
+    r'https?://\S+',
+    caseSensitive: false,
+  );
 
-  String? _extractYoutubeUrl(List<SharedMediaFile> items) {
+  String? _extractUrl(List<SharedMediaFile> items) {
     for (final m in items) {
-      // Most YouTube share intents land in `.path` (or `.message` on older
-      // package versions) as plain text containing the URL.
+      // Most share intents land the URL (sometimes with surrounding text)
+      // in `.path` — match any http(s) URL inside the payload.
       final candidate = m.path;
-      final match = _urlRegex.firstMatch(candidate);
-      if (match != null) return match.group(0);
+      final yt = _youtubeUrlRegex.firstMatch(candidate);
+      if (yt != null) return yt.group(0);
+      final any = _anyUrlRegex.firstMatch(candidate);
+      if (any != null) return any.group(0);
     }
     return null;
   }
@@ -310,6 +341,56 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     await _persist();
   }
 
+  Future<void> _onStartArticleGeneration(
+    Track downloading,
+    ExtractedArticle article,
+  ) async {
+    final apiKey = await _settings.apiKey();
+    if (apiKey == null) {
+      // The sheet only lets the user reach this state after we confirmed the
+      // key exists, but guard anyway in case they cleared it in a parallel
+      // tab.
+      if (!mounted) return;
+      setState(() {
+        _screen = _Screen.library;
+        _pendingArticleUrl = null;
+      });
+      return;
+    }
+    final voiceId = await _settings.voiceId();
+    if (!mounted) return;
+    final generationFuture = _downloads.startArticleGeneration(
+      track: downloading,
+      article: article,
+      apiKey: apiKey,
+      voiceId: voiceId,
+    );
+    setState(() {
+      _tracks = [downloading, ..._tracks];
+      _screen = _Screen.library;
+      _pendingArticleUrl = null;
+    });
+    await _persist();
+    await generationFuture;
+  }
+
+  Future<void> _openSettings({bool fromArticleSheet = false}) async {
+    if (!mounted) return;
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    );
+    if (!mounted) return;
+    // If we came from the article sheet with no key, and the user just saved
+    // one, bump the epoch so the sheet's State is rebuilt and re-resolves
+    // (otherwise it'd still be sitting in _Phase.noKey).
+    if (fromArticleSheet && saved == true && _pendingArticleUrl != null) {
+      setState(() {
+        _articleSheetEpoch++;
+        _screen = _Screen.article;
+      });
+    }
+  }
+
   Future<void> _onStartDownload(Track downloading) async {
     // Kick off the download FIRST. start()'s synchronous prefix inserts the
     // per-track ValueNotifier into DownloadManager._active before any await,
@@ -415,6 +496,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                 onDelete: _deleteTrack,
                 onClearFinished: _clearFinished,
                 onSearch: () => setState(() => _screen = _Screen.search),
+                onOpenSettings: () => _openSettings(),
                 downloadProgressFor: _downloads.progressFor,
               ),
             ),
@@ -521,6 +603,17 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                 }),
                 onStartDownload: _onStartDownload,
               ),
+            if (_screen == _Screen.article && _pendingArticleUrl != null)
+              ArticleSheet(
+                key: ValueKey('$_pendingArticleUrl@$_articleSheetEpoch'),
+                url: _pendingArticleUrl!,
+                onClose: () => setState(() {
+                  _screen = _Screen.library;
+                  _pendingArticleUrl = null;
+                }),
+                onStartGeneration: _onStartArticleGeneration,
+                onOpenSettings: () => _openSettings(fromArticleSheet: true),
+              ),
             if (hasCurrent && _screen == _Screen.lock)
               _FadeIn(
                 child: LockScreen(
@@ -552,10 +645,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
       builder: (ctx) => _PasteUrlDialog(controller: controller),
     );
     if (url == null) return;
-    setState(() {
-      _pendingDownloadUrl = url;
-      _screen = _Screen.download;
-    });
+    _dispatchSharedUrl(url);
   }
 }
 
@@ -578,8 +668,8 @@ class _PasteUrlDialog extends StatelessWidget {
                 style: AuroraTheme.display(size: 18, weight: FontWeight.w700, letterSpacing: -0.3)),
             const SizedBox(height: 6),
             Text(
-              'Paste a YouTube link to extract its audio.',
-              style: AuroraTheme.body(size: 12, color: AuroraTheme.muted),
+              'YouTube links extract directly. Article URLs are read aloud via ElevenLabs.',
+              style: AuroraTheme.body(size: 12, color: AuroraTheme.muted, height: 1.4),
             ),
             const SizedBox(height: 14),
             TextField(
@@ -589,7 +679,7 @@ class _PasteUrlDialog extends StatelessWidget {
               cursorColor: AuroraTheme.accent,
               style: AuroraTheme.body(size: 14),
               decoration: InputDecoration(
-                hintText: 'https://youtu.be/…',
+                hintText: 'https://…',
                 hintStyle: AuroraTheme.body(size: 14, color: AuroraTheme.dim),
                 filled: true,
                 fillColor: AuroraTheme.surface2,
@@ -628,7 +718,7 @@ class _PasteUrlDialog extends StatelessWidget {
                     foregroundColor: AuroraTheme.onAccent,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                  child: Text('Download',
+                  child: Text('Add',
                       style: AuroraTheme.body(size: 13, weight: FontWeight.w700, color: AuroraTheme.onAccent)),
                 ),
               ],

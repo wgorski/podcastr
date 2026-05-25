@@ -1,7 +1,7 @@
 name: podcastr
 description: Podcastr — Aurora-themed audio library (Flutter port of the design prototype).
 publish_to: "none"
-version: 0.5.1
+version: 0.6.0
 
 environment:
   sdk: ">=3.6.0 <4.0.0"
@@ -26,6 +26,10 @@ dependencies:
   just_audio_background: ^0.0.1-beta.13
   # Native share sheet (Share the original YouTube URL out of the app)
   share_plus: ^10.1.4
+  # HTTP client for fetching article HTML and calling the ElevenLabs TTS API
+  http: ^1.2.2
+  # HTML parser for extracting the main article body from arbitrary pages
+  html: ^0.15.5
 
 dev_dependencies:
   flutter_lints: ^4.0.0
