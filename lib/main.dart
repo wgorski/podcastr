@@ -488,20 +488,26 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
               ),
             if (_screen == _Screen.search)
               _FadeIn(
-                child: SafeArea(
-                  top: false,
-                  child: SearchScreen(
-                    tracks: _tracks,
-                    onClose: () => setState(() => _screen = _Screen.library),
-                    onSelect: (t) {
-                      if (t.status == TrackStatus.ready) {
-                        _selectTrack(t, startPlaying: true);
-                      }
-                      setState(() {
-                        _viewedTrack = t;
-                        _screen = _Screen.player;
-                      });
-                    },
+                child: PopScope(
+                  canPop: false,
+                  onPopInvokedWithResult: (didPop, _) {
+                    if (!didPop) setState(() => _screen = _Screen.library);
+                  },
+                  child: SafeArea(
+                    top: false,
+                    child: SearchScreen(
+                      tracks: _tracks,
+                      onClose: () => setState(() => _screen = _Screen.library),
+                      onSelect: (t) {
+                        if (t.status == TrackStatus.ready) {
+                          _selectTrack(t, startPlaying: true);
+                        }
+                        setState(() {
+                          _viewedTrack = t;
+                          _screen = _Screen.player;
+                        });
+                      },
+                    ),
                   ),
                 ),
               ),
