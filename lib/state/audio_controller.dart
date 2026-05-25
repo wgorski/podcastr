@@ -19,6 +19,15 @@ class AudioController {
   double _speed = 1.0;
   bool _ready = false;
   DateTime _lastSavedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  // Last position emitted by positionStream while playing. Used as the source
+  // of truth for `_saveNow` because `_player.position` falls back to the last
+  // *broadcast* updatePosition once `playing` flips false — and just_audio's
+  // Android side does not broadcast on pause, so that fallback is typically
+  // the position from when STATE_READY last fired (i.e. play start). Saving
+  // it would clobber the per-second autosave with that stale value, which is
+  // exactly the regression where pausing from the media-session notification
+  // rewound the resume point to "before I started listening".
+  Duration _latestPosition = Duration.zero;
 
   late final StreamSubscription _posSub;
   late final StreamSubscription _stateSub;
@@ -28,7 +37,8 @@ class AudioController {
     void Function(String trackId)? onCompleted,
   })  : _onChanged = onChanged,
         _onCompleted = onCompleted {
-    _posSub = _player.positionStream.listen((_) {
+    _posSub = _player.positionStream.listen((pos) {
+      _latestPosition = pos;
       _onChanged();
       _maybeSavePosition();
     });
@@ -45,8 +55,9 @@ class AudioController {
         }
       } else if (!s.playing) {
         // Pause from any source (in-app button, notification, Bluetooth,
-        // headset). Persist synchronously so it survives the foreground
-        // service stopping right after.
+        // headset). `_saveNow` reads `_latestPosition`, not `_player.position`,
+        // so this captures the actual pause point even though just_audio does
+        // not refresh updatePosition on pause.
         unawaited(_saveNow());
       }
       _onChanged();
@@ -67,7 +78,10 @@ class AudioController {
   Future<void> _saveNow() async {
     final t = _current;
     if (t == null) return;
-    final pos = _player.position;
+    // Prefer the live extrapolated position while playing; once paused, fall
+    // back to the last value positionStream emitted while playing. See
+    // [_latestPosition] for why `_player.position` is unreliable on pause.
+    final pos = _player.playing ? _player.position : _latestPosition;
     final total = _player.duration ?? Duration(seconds: t.duration);
     // Don't save the trivial endpoints: 0 means "fresh", end means "done".
     if (pos > const Duration(seconds: 2) && pos < total - const Duration(seconds: 2)) {
@@ -101,6 +115,7 @@ class AudioController {
     // Persist the previous track's position before switching off it.
     await _saveNow();
     _current = t;
+    _latestPosition = Duration.zero;
     _ready = false;
     final path = t.filePath;
     if (path == null) {
@@ -178,6 +193,7 @@ class AudioController {
   Future<void> stop() async {
     await _player.stop();
     _current = null;
+    _latestPosition = Duration.zero;
     _ready = false;
     _onChanged();
   }
