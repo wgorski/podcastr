@@ -46,6 +46,12 @@ class _ArticleSheetState extends State<ArticleSheet> {
     _resolve();
   }
 
+  @override
+  void dispose() {
+    _extractor.dispose();
+    super.dispose();
+  }
+
   Future<void> _resolve() async {
     setState(() {
       _phase = _Phase.resolving;
@@ -209,6 +215,11 @@ class _Sheet extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(22, 14, 22, 0),
             child: _MetadataCard(phase: phase, article: article, url: url),
           ),
+          if (article != null && article!.usedFallback)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 10, 22, 0),
+              child: _FallbackNotice(reason: article!.fallbackReason),
+            ),
           if (phase == _Phase.error)
             Padding(
               padding: const EdgeInsets.fromLTRB(22, 14, 22, 0),
@@ -440,5 +451,42 @@ class _PreviewArt extends StatelessWidget {
       color2: palette.c2,
     );
     return SquareArt(track: pseudoTrack, size: 48, radius: 10);
+  }
+}
+
+/// Light banner shown when Jina Reader was unreachable and we fell back to
+/// the on-device Readability.js path. The user might still want to know
+/// because the local reader can pick up slightly different boilerplate.
+class _FallbackNotice extends StatelessWidget {
+  final String? reason;
+  const _FallbackNotice({required this.reason});
+
+  @override
+  Widget build(BuildContext context) {
+    final r = reason?.trim();
+    final tail = (r == null || r.isEmpty) ? '' : ' · $r';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AuroraTheme.surface2,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AuroraTheme.border, width: 1),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.offline_bolt_outlined,
+              size: 14, color: AuroraTheme.muted),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Parsed with on-device reader (Jina unreachable$tail).',
+              style: AuroraTheme.body(
+                  size: 11, color: AuroraTheme.muted, height: 1.35),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
