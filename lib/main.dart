@@ -483,6 +483,8 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
 
   Future<void> _onDownloadCompleted(Track ready) async {
     if (!mounted) return;
+    final wasViewedInPlayer =
+        _screen == _Screen.player && _viewedTrack?.id == ready.id;
     setState(() {
       _tracks = [
         for (final t in _tracks) t.id == ready.id ? ready : t,
@@ -491,9 +493,19 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
         _viewedTrack = ready;
       }
     });
-    // If nothing is currently loaded in the player, bind this fresh track.
+    // Two cases where we bind this freshly-finished track into the audio
+    // engine on its own:
+    //  1. The player has nothing loaded yet (first-ever track).
+    //  2. The user is currently looking at this very track's now-playing
+    //     screen — they opened it while it was still downloading, so the
+    //     engine still has whatever was playing before. Without this swap,
+    //     pressing the big play button would resume the previous track
+    //     instead of starting the one they're staring at.
     if (_current == null) {
       await _audio.load(ready);
+    } else if (wasViewedInPlayer && _current!.id != ready.id) {
+      await _audio.load(ready);
+      await _selection.save(ready.id);
     }
     await _persist();
   }
