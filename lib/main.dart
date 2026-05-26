@@ -7,6 +7,7 @@ import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'models/track.dart';
+import 'screens/archive_screen.dart';
 import 'screens/download_sheet.dart';
 import 'screens/library_screen.dart';
 import 'screens/lock_screen.dart';
@@ -71,7 +72,7 @@ class PodcastrApp extends StatelessWidget {
   }
 }
 
-enum _Screen { library, player, search, download, lock }
+enum _Screen { library, player, search, download, lock, archive }
 
 class _PodcastrHome extends StatefulWidget {
   const _PodcastrHome();
@@ -138,14 +139,17 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     if (!mounted) return;
     setState(() => _tracks = tracks);
     // Re-bind to whatever the user last selected. If they never picked one,
-    // or that track is gone / no longer ready, leave the player empty —
-    // don't fall back to the most recently downloaded track (otherwise
-    // every fresh download silently becomes the "selected" one on reopen).
+    // or that track is gone / no longer ready / archived, leave the player
+    // empty — don't fall back to the most recently downloaded track
+    // (otherwise every fresh download silently becomes the "selected" one
+    // on reopen).
     final selectedId = await _selection.load();
     if (selectedId != null) {
       Track? selected;
       for (final t in tracks) {
-        if (t.id == selectedId && t.status == TrackStatus.ready) {
+        if (t.id == selectedId &&
+            t.status == TrackStatus.ready &&
+            !t.archived) {
           selected = t;
           break;
         }
@@ -283,19 +287,65 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     _persist();
   }
 
-  Future<void> _clearFinished() async {
-    final finished = _tracks.where((t) => t.finished).toList();
+  Future<void> _archiveFinished() async {
+    final finished = _tracks.where((t) => t.finished && !t.archived).toList();
     if (finished.isEmpty) return;
     for (final t in finished) {
-      await _deleteTrack(t);
+      await _archiveTrack(t);
     }
   }
 
-  Future<void> _deleteTrack(Track t) async {
-    // Stop any in-flight download for this id; abort doesn't fire onFailed.
+  /// Move a track into the archive. The audio file stays on disk so it can
+  /// still be played from the archive view in the future — only [_permanentlyDeleteTrack]
+  /// removes the file.
+  Future<void> _archiveTrack(Track t) async {
+    // An in-flight download has no file yet; abort it and remove the row
+    // outright instead of archiving an empty entry.
     if (_downloads.isActive(t.id)) {
       await _downloads.abort(t.id);
+      await _purgeTrack(t);
+      return;
     }
+    // Failed downloads never produced an audio file. Archiving one would
+    // leave a broken row in the archive — just drop it.
+    if (t.status == TrackStatus.failed) {
+      await _purgeTrack(t);
+      return;
+    }
+    final wasCurrent = _current?.id == t.id;
+    final updated = t.copyWith(archived: true);
+    final next = [
+      for (final x in _tracks) x.id == t.id ? updated : x,
+    ];
+    setState(() {
+      _tracks = next;
+      if (_viewedTrack?.id == t.id) _viewedTrack = updated;
+    });
+    if (wasCurrent) {
+      await _selection.clear();
+      await _audio.stop();
+      Track? nextReady;
+      for (final x in next) {
+        if (x.status == TrackStatus.ready && !x.archived) {
+          nextReady = x;
+          break;
+        }
+      }
+      if (nextReady != null) {
+        await _audio.load(nextReady);
+      }
+    }
+    await _persist();
+  }
+
+  /// Remove a track from the archive: deletes the persisted row, drops the
+  /// resume point, and removes the audio file from disk. Only invoked from
+  /// the archive view per the spec.
+  Future<void> _permanentlyDeleteTrack(Track t) async {
+    await _purgeTrack(t);
+  }
+
+  Future<void> _purgeTrack(Track t) async {
     final remaining = _tracks.where((x) => x.id != t.id).toList();
     final wasCurrent = _current?.id == t.id;
     setState(() {
@@ -307,7 +357,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
       await _audio.stop();
       Track? nextReady;
       for (final x in remaining) {
-        if (x.status == TrackStatus.ready) {
+        if (x.status == TrackStatus.ready && !x.archived) {
           nextReady = x;
           break;
         }
@@ -409,6 +459,8 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   Widget build(BuildContext context) {
     final hasCurrent = _current != null;
     final viewed = _viewedTrack;
+    final libraryTracks = [for (final t in _tracks) if (!t.archived) t];
+    final archivedTracks = [for (final t in _tracks) if (t.archived) t];
     return Scaffold(
       backgroundColor: AuroraTheme.bg,
       body: DecoratedBox(
@@ -418,14 +470,16 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
             // Library is always the base layer.
             Positioned.fill(
               child: LibraryScreen(
-                tracks: _tracks,
+                tracks: libraryTracks,
+                archivedCount: archivedTracks.length,
                 currentId: _current?.id,
                 playing: _playing,
                 onOpenTrack: _openTrack,
                 onPlay: _playTapped,
-                onDelete: _deleteTrack,
-                onClearFinished: _clearFinished,
+                onArchive: _archiveTrack,
+                onArchiveFinished: _archiveFinished,
                 onSearch: () => setState(() => _screen = _Screen.search),
+                onOpenArchive: () => setState(() => _screen = _Screen.archive),
                 downloadProgressFor: _downloads.progressFor,
               ),
             ),
@@ -487,9 +541,9 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                           onRetryDownload: () => _retryDownload(fresh),
                           onArtworkVerticalDragUpdate: onDragUpdate,
                           onArtworkVerticalDragEnd: onDragEnd,
-                          onDelete: () async {
+                          onArchive: () async {
                             setState(() => _screen = _Screen.library);
-                            await _deleteTrack(fresh);
+                            await _archiveTrack(fresh);
                           },
                         ),
                       ),
@@ -507,7 +561,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                   child: SafeArea(
                     top: false,
                     child: SearchScreen(
-                      tracks: _tracks,
+                      tracks: libraryTracks,
                       onClose: () => setState(() => _screen = _Screen.library),
                       onSelect: (t) {
                         if (t.status == TrackStatus.ready) {
@@ -518,6 +572,23 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                           _screen = _Screen.player;
                         });
                       },
+                    ),
+                  ),
+                ),
+              ),
+            if (_screen == _Screen.archive)
+              _FadeIn(
+                child: PopScope(
+                  canPop: false,
+                  onPopInvokedWithResult: (didPop, _) {
+                    if (!didPop) setState(() => _screen = _Screen.library);
+                  },
+                  child: SafeArea(
+                    top: false,
+                    child: ArchiveScreen(
+                      tracks: archivedTracks,
+                      onClose: () => setState(() => _screen = _Screen.library),
+                      onDeletePermanently: _permanentlyDeleteTrack,
                     ),
                   ),
                 ),

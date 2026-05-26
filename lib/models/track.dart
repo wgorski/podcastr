@@ -36,6 +36,13 @@ class Track {
   /// [status]: a track can be `ready + finished` (downloaded, fully played).
   /// Replaying does not clear this — only the Clear action does.
   final bool finished;
+  /// True when the user moved the track into the archive. Archived tracks are
+  /// hidden from the library and live in the archive view, where they can be
+  /// permanently deleted.
+  final bool archived;
+  /// Milliseconds since epoch — captured when the download completes. Null for
+  /// rows persisted before this field existed; treated as 0 for sort order.
+  final int? downloadedAtMs;
 
   const Track({
     required this.id,
@@ -55,6 +62,8 @@ class Track {
     this.sourceUrl,
     this.errorMessage,
     this.finished = false,
+    this.archived = false,
+    this.downloadedAtMs,
   });
 
   int get seed {
@@ -83,6 +92,8 @@ class Track {
     String? errorMessage,
     bool clearErrorMessage = false,
     bool? finished,
+    bool? archived,
+    int? downloadedAtMs,
   }) {
     return Track(
       id: id ?? this.id,
@@ -103,6 +114,8 @@ class Track {
       sourceUrl: sourceUrl ?? this.sourceUrl,
       errorMessage: clearErrorMessage ? null : (errorMessage ?? this.errorMessage),
       finished: finished ?? this.finished,
+      archived: archived ?? this.archived,
+      downloadedAtMs: downloadedAtMs ?? this.downloadedAtMs,
     );
   }
 
@@ -124,6 +137,8 @@ class Track {
         'sourceUrl': sourceUrl,
         'errorMessage': errorMessage,
         'finished': finished,
+        'archived': archived,
+        'downloadedAtMs': downloadedAtMs,
       };
 
   factory Track.fromJson(Map<String, dynamic> j) => Track(
@@ -145,6 +160,8 @@ class Track {
         sourceUrl: j['sourceUrl'] as String?,
         errorMessage: j['errorMessage'] as String?,
         finished: (j['finished'] as bool?) ?? false,
+        archived: (j['archived'] as bool?) ?? false,
+        downloadedAtMs: j['downloadedAtMs'] as int?,
       );
 }
 

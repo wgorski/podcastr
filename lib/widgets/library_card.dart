@@ -82,6 +82,14 @@ class LibraryCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                  // "Already listened" scrim so finished tracks read at a
+                  // glance as already-consumed, without hiding the artwork.
+                  if (track.finished && track.status == TrackStatus.ready)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: Container(color: Colors.black.withValues(alpha: 0.35)),
+                      ),
+                    ),
                   Positioned(
                     left: 14,
                     right: 70,
