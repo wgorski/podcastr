@@ -122,7 +122,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Default is "Aria" (free tier). Find more in your ElevenLabs voice library and paste the ID here — note that Voice Library voices need a paid plan.',
+                            'Default is "Alice" (free-tier-accessible). Other free voices: Adam, George, Liam, Antoni, Arnold, Daniel. Voice Library voices need a paid plan.',
                             style: AuroraTheme.body(
                                 size: 11, color: AuroraTheme.dim, height: 1.4),
                           ),

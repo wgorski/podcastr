@@ -35,10 +35,13 @@ class ElevenLabsTts {
   /// long.
   static const int chunkLimit = 3000;
   static const String _baseUrl = 'https://api.elevenlabs.io/v1/text-to-speech';
-  // "Aria" — one of the premade voices that ElevenLabs keeps in the free
-  // tier. The older "Rachel" voice (21m00Tcm4TlvDq8ikWAM) was moved to the
-  // Voice Library, which free API keys can't synthesize.
-  static const String defaultVoiceId = '9BWtsMINqrJLrRacOk9x';
+  // "Alice" — one of the legacy default voices that ElevenLabs still lets
+  // free API keys synthesize. Both "Rachel" (21m00Tcm4TlvDq8ikWAM) and the
+  // newer "Aria" (9BWtsMINqrJLrRacOk9x) were moved to the Voice Library
+  // and now return HTTP 402 "Free users cannot use library voices via the
+  // API" on free plans. The known-free siblings as of mid-2026 are Adam,
+  // George, Liam, Antoni, Arnold, Daniel, and Alice.
+  static const String defaultVoiceId = 'Xb7hH8MSUJpSbSDYk0k2';
   static const String defaultModelId = 'eleven_multilingual_v2';
 
   final http.Client _client;

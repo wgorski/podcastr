@@ -70,3 +70,7 @@ app.*.map.json
 /search.png
 /page-*.png
 /.playwright-mcp/
+
+# Secret credentials — never commit
+/elevenlabs.token
+/*.token
