@@ -15,6 +15,7 @@ import 'screens/search_screen.dart';
 import 'state/audio_controller.dart';
 import 'state/download_manager.dart';
 import 'state/library_store.dart';
+import 'state/selection_store.dart';
 import 'theme/aurora_theme.dart';
 import 'widgets/mini_player.dart';
 
@@ -81,6 +82,7 @@ class _PodcastrHome extends StatefulWidget {
 
 class _PodcastrHomeState extends State<_PodcastrHome> {
   final _store = LibraryStore();
+  final _selection = SelectionStore();
   late final AudioController _audio = AudioController(
     onChanged: () {
       if (mounted) setState(() {});
@@ -135,17 +137,24 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     final tracks = await _store.load();
     if (!mounted) return;
     setState(() => _tracks = tracks);
-    // Auto-load the first *ready* track so the mini-player has something
-    // to bind to.
-    Track? firstReady;
-    for (final t in tracks) {
-      if (t.status == TrackStatus.ready) {
-        firstReady = t;
-        break;
+    // Re-bind to whatever the user last selected. If they never picked one,
+    // or that track is gone / no longer ready, leave the player empty —
+    // don't fall back to the most recently downloaded track (otherwise
+    // every fresh download silently becomes the "selected" one on reopen).
+    final selectedId = await _selection.load();
+    if (selectedId != null) {
+      Track? selected;
+      for (final t in tracks) {
+        if (t.id == selectedId && t.status == TrackStatus.ready) {
+          selected = t;
+          break;
+        }
       }
-    }
-    if (firstReady != null) {
-      await _audio.load(firstReady);
+      if (selected != null) {
+        await _audio.load(selected);
+      } else {
+        await _selection.clear();
+      }
     }
     // Re-attach to any downloads that were in flight when the app was
     // killed. Native side checks WorkManager state and either resumes
@@ -224,6 +233,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   Future<void> _selectTrack(Track t, {bool startPlaying = false}) async {
     if (t.status != TrackStatus.ready) return;
     await _audio.load(t, andPlay: startPlaying);
+    await _selection.save(t.id);
   }
 
   void _openTrack(Track t) {
@@ -293,6 +303,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
       if (_viewedTrack?.id == t.id) _viewedTrack = null;
     });
     if (wasCurrent) {
+      await _selection.clear();
       await _audio.stop();
       Track? nextReady;
       for (final x in remaining) {
