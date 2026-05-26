@@ -126,6 +126,72 @@ void main() {
       await expectLater(extractor.extract(url), throwsA(isA<StateError>()));
       expect(ready.calls, 0);
     });
+
+    group('ExtractionMode.localOnly', () {
+      test('skips Jina and calls Readability directly', () async {
+        const url = 'https://example.com/post';
+        final jina = _StubJina((_) async => fail('Jina must not be called'));
+        final ready = _StubReadability((u) async => _article(u));
+        final extractor = ArticleExtractor(jina: jina, readability: ready);
+
+        final out =
+            await extractor.extract(url, mode: ExtractionMode.localOnly);
+        expect(jina.calls, 0);
+        expect(ready.calls, 1);
+        // Local-only is a user preference, not a fallback — no banner.
+        expect(out.usedFallback, isFalse);
+        expect(out.fallbackReason, isNull);
+      });
+
+      test('surfaces a Readability failure as ArticleException, no Jina retry',
+          () async {
+        const url = 'https://example.com/post';
+        final jina = _StubJina((_) async => fail('Jina must not be called'));
+        final ready = _StubReadability(
+            (_) async => throw const ReadabilityException('No DOM'));
+        final extractor = ArticleExtractor(jina: jina, readability: ready);
+
+        await expectLater(
+          extractor.extract(url, mode: ExtractionMode.localOnly),
+          throwsA(isA<ArticleException>()
+              .having((e) => e.toString(), 'message', contains('No DOM'))),
+        );
+        expect(jina.calls, 0);
+      });
+
+      test('respects the constructor default mode when no override is passed',
+          () async {
+        const url = 'https://example.com/post';
+        final jina = _StubJina((_) async => fail('Jina must not be called'));
+        final ready = _StubReadability((u) async => _article(u));
+        final extractor = ArticleExtractor(
+          jina: jina,
+          readability: ready,
+          defaultMode: ExtractionMode.localOnly,
+        );
+
+        await extractor.extract(url);
+        expect(jina.calls, 0);
+        expect(ready.calls, 1);
+      });
+
+      test('per-call mode overrides the constructor default', () async {
+        const url = 'https://example.com/post';
+        final jina = _StubJina((u) async => _article(u));
+        final ready = _StubReadability(
+            (_) async => fail('Readability must not be called'));
+        final extractor = ArticleExtractor(
+          jina: jina,
+          readability: ready,
+          defaultMode: ExtractionMode.localOnly,
+        );
+
+        await extractor.extract(url,
+            mode: ExtractionMode.jinaWithLocalFallback);
+        expect(jina.calls, 1);
+        expect(ready.calls, 0);
+      });
+    });
   });
 
   group('ExtractedArticle', () {

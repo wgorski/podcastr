@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/article_extractor.dart';
 import '../services/elevenlabs_tts.dart';
 import '../state/settings_store.dart';
 import '../theme/aurora_theme.dart';
@@ -22,6 +23,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _voiceCtrl = TextEditingController();
   bool _obscure = true;
   bool _loaded = false;
+  ExtractionMode _mode = ExtractionMode.jinaWithLocalFallback;
 
   @override
   void initState() {
@@ -32,10 +34,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final key = await _store.apiKey();
     final voice = await _store.voiceId();
+    final mode = await _store.extractionMode();
     if (!mounted) return;
     setState(() {
       _apiKeyCtrl.text = key ?? '';
       _voiceCtrl.text = voice;
+      _mode = mode;
       _loaded = true;
     });
   }
@@ -45,6 +49,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final voice = _voiceCtrl.text.trim();
     await _store.setApiKey(key.isEmpty ? null : key);
     await _store.setVoiceId(voice.isEmpty ? null : voice);
+    await _store.setExtractionMode(_mode);
     if (!mounted) return;
     Navigator.of(context).pop(key.isNotEmpty);
   }
@@ -120,6 +125,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             'Default is "Rachel". Find more in your ElevenLabs voice library and paste the ID here.',
                             style: AuroraTheme.body(
                                 size: 11, color: AuroraTheme.dim, height: 1.4),
+                          ),
+                          const SizedBox(height: 24),
+                          _SectionLabel('Article extraction'),
+                          const SizedBox(height: 8),
+                          Text(
+                            'How the article body is pulled out of the page before TTS.',
+                            style: AuroraTheme.body(
+                                size: 12, color: AuroraTheme.muted, height: 1.45),
+                          ),
+                          const SizedBox(height: 10),
+                          _ExtractionModeOption(
+                            mode: ExtractionMode.jinaWithLocalFallback,
+                            selected: _mode,
+                            title: 'Jina Reader, fall back locally',
+                            subtitle:
+                                'Fast hosted reader-mode. URL is sent to r.jina.ai. '
+                                'Drops to on-device parsing if Jina is unreachable.',
+                            onTap: (m) => setState(() => _mode = m),
+                          ),
+                          const SizedBox(height: 8),
+                          _ExtractionModeOption(
+                            mode: ExtractionMode.localOnly,
+                            selected: _mode,
+                            title: 'On-device only',
+                            subtitle:
+                                'Runs Mozilla Readability.js in a hidden WebView. '
+                                'Slower, but the URL never leaves your phone.',
+                            onTap: (m) => setState(() => _mode = m),
                           ),
                           const SizedBox(height: 28),
                           SizedBox(
@@ -232,6 +265,98 @@ class _ApiKeyField extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         borderSide: BorderSide(color: color ?? AuroraTheme.border),
       );
+}
+
+/// Radio-style row for picking an [ExtractionMode]. Aurora-flavoured so it
+/// reads as part of the settings sheet rather than a default Material
+/// RadioListTile.
+class _ExtractionModeOption extends StatelessWidget {
+  final ExtractionMode mode;
+  final ExtractionMode selected;
+  final String title;
+  final String subtitle;
+  final ValueChanged<ExtractionMode> onTap;
+  const _ExtractionModeOption({
+    required this.mode,
+    required this.selected,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isOn = mode == selected;
+    return InkWell(
+      onTap: () => onTap(mode),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: AuroraTheme.surface2,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isOn ? AuroraTheme.accent : AuroraTheme.border,
+            width: 1,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 18,
+              height: 18,
+              margin: const EdgeInsets.only(top: 2),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isOn ? AuroraTheme.accent : AuroraTheme.dim,
+                  width: 1.5,
+                ),
+              ),
+              child: isOn
+                  ? Center(
+                      child: Container(
+                        width: 9,
+                        height: 9,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: AuroraTheme.accent,
+                        ),
+                      ),
+                    )
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: AuroraTheme.body(
+                      size: 13,
+                      weight: FontWeight.w700,
+                      color: AuroraTheme.text,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: AuroraTheme.body(
+                      size: 11,
+                      color: AuroraTheme.muted,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _PlainField extends StatelessWidget {

@@ -1,6 +1,19 @@
 import 'jina_reader.dart';
 import 'readability_extractor.dart';
 
+/// User-selectable extraction strategy. Stored in [SettingsStore] and
+/// passed into [ArticleExtractor.extract] per call.
+enum ExtractionMode {
+  /// Try Jina Reader first (fast hosted service); on failure, run the
+  /// bundled Readability.js inside a HeadlessInAppWebView.
+  jinaWithLocalFallback,
+
+  /// Skip Jina entirely and always run the on-device Readability.js
+  /// path. Useful when the user doesn't want to send article URLs to a
+  /// third-party reader service.
+  localOnly,
+}
+
 /// What we extract from an article URL — enough to render the preview card
 /// in the article sheet and to feed the TTS engine.
 class ExtractedArticle {
@@ -88,16 +101,33 @@ class ArticleExtractor {
   final JinaReader _jina;
   final ReadabilityExtractor _readability;
 
-  ArticleExtractor({JinaReader? jina, ReadabilityExtractor? readability})
-      : _jina = jina ?? JinaReader(),
+  /// Mode used when [extract] is called without an explicit override.
+  final ExtractionMode defaultMode;
+
+  ArticleExtractor({
+    JinaReader? jina,
+    ReadabilityExtractor? readability,
+    this.defaultMode = ExtractionMode.jinaWithLocalFallback,
+  })  : _jina = jina ?? JinaReader(),
         _readability = readability ?? ReadabilityExtractor();
 
-  Future<ExtractedArticle> extract(String url) async {
+  Future<ExtractedArticle> extract(String url, {ExtractionMode? mode}) async {
     final uri = Uri.tryParse(url);
     if (uri == null || !uri.hasScheme || !uri.hasAuthority) {
       throw const ArticleException('Not a valid URL.');
     }
+    final useMode = mode ?? defaultMode;
 
+    if (useMode == ExtractionMode.localOnly) {
+      try {
+        return await _readability.extract(url);
+      } catch (e) {
+        throw ArticleException('Couldn\'t read this page: $e');
+      }
+    }
+
+    // jinaWithLocalFallback: try Jina, fall back to Readability on a
+    // recognised JinaException. Other errors propagate as-is.
     try {
       return await _jina.extract(url);
     } on JinaException catch (jinaErr) {

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:podcastr/services/article_extractor.dart';
 import 'package:podcastr/services/elevenlabs_tts.dart';
 import 'package:podcastr/state/settings_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -49,6 +50,35 @@ void main() {
         () async {
       await store.setVoiceId('   ');
       expect(await store.voiceId(), ElevenLabsTts.defaultVoiceId);
+    });
+  });
+
+  group('SettingsStore.extractionMode', () {
+    test('defaults to jinaWithLocalFallback when nothing is stored',
+        () async {
+      expect(await store.extractionMode(),
+          ExtractionMode.jinaWithLocalFallback);
+    });
+
+    test('round-trips localOnly', () async {
+      await store.setExtractionMode(ExtractionMode.localOnly);
+      expect(await store.extractionMode(), ExtractionMode.localOnly);
+    });
+
+    test('round-trips jinaWithLocalFallback', () async {
+      await store.setExtractionMode(ExtractionMode.localOnly);
+      await store.setExtractionMode(ExtractionMode.jinaWithLocalFallback);
+      expect(await store.extractionMode(),
+          ExtractionMode.jinaWithLocalFallback);
+    });
+
+    test('falls back to the default for an unknown stored value', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'article.extractionMode': 'bogus-mode',
+      });
+      final fresh = SettingsStore();
+      expect(await fresh.extractionMode(),
+          ExtractionMode.jinaWithLocalFallback);
     });
   });
 }

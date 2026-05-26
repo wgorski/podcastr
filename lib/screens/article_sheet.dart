@@ -58,7 +58,8 @@ class _ArticleSheetState extends State<ArticleSheet> {
       _errorMessage = null;
     });
     try {
-      final article = await _extractor.extract(widget.url);
+      final mode = await _settings.extractionMode();
+      final article = await _extractor.extract(widget.url, mode: mode);
       if (!mounted) return;
       // Surface the missing-key state up front — the user shouldn't have to
       // wait for ElevenLabs to reject the request to learn it's missing.
