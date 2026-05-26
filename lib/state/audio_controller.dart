@@ -18,6 +18,11 @@ class AudioController {
   Track? _current;
   double _speed = 1.0;
   bool _ready = false;
+  // Tracks the last broadcast `playing` flag so we can detect playing→paused
+  // transitions (the spot where "abandoned near the end" should mark the track
+  // as finished). Bare !playing fires on every state event, so we'd otherwise
+  // mark every load / preload tick.
+  bool _wasPlaying = false;
   DateTime _lastSavedAt = DateTime.fromMillisecondsSinceEpoch(0);
   // Last position emitted by positionStream while playing. Used as the source
   // of truth for `_saveNow` because `_player.position` falls back to the last
@@ -53,19 +58,39 @@ class AudioController {
           _positions.remove(t.id);
           _onCompleted?.call(t.id);
         }
-      } else if (!s.playing) {
-        // Pause from any source (in-app button, notification, Bluetooth,
-        // headset). `_saveNow` reads `_latestPosition`, not `_player.position`,
-        // so this captures the actual pause point even though just_audio does
-        // not refresh updatePosition on pause.
+      } else if (_wasPlaying && !s.playing) {
+        // Real pause: the user (or notification / headset / Bluetooth) stopped
+        // playback. `_saveNow` reads `_latestPosition`, not `_player.position`,
+        // so it captures the pause point even though just_audio does not
+        // refresh updatePosition on pause. Also fire onCompleted if the user
+        // gave up within the final minute — close enough to count as listened.
         unawaited(_saveNow());
+        _maybeMarkFinished();
       }
+      _wasPlaying = s.playing;
       _onChanged();
     });
   }
 
   /// Drop the saved resume point for a track (used when the track is deleted).
   Future<void> forget(String id) => _positions.remove(id);
+
+  /// Treat the current track as finished if playback is within the final
+  /// minute. Called when the user pauses or switches away from a track.
+  /// Safe to call repeatedly — the host marks tracks as finished idempotently.
+  void _maybeMarkFinished() {
+    final t = _current;
+    if (t == null) return;
+    final cb = _onCompleted;
+    if (cb == null) return;
+    final pos = _player.playing ? _player.position : _latestPosition;
+    final total = _player.duration ?? Duration(seconds: t.duration);
+    if (total <= Duration.zero) return;
+    if (pos <= Duration.zero) return;
+    if (total - pos < const Duration(seconds: 60)) {
+      cb(t.id);
+    }
+  }
 
   void _maybeSavePosition() {
     final now = DateTime.now();
@@ -114,9 +139,15 @@ class AudioController {
   Future<void> load(Track t, {bool andPlay = false}) async {
     // Persist the previous track's position before switching off it.
     await _saveNow();
+    // If the user is opening a *different* podcast, the one they're leaving
+    // counts as finished when only the final minute is left.
+    if (_current != null && _current!.id != t.id) {
+      _maybeMarkFinished();
+    }
     _current = t;
     _latestPosition = Duration.zero;
     _ready = false;
+    _wasPlaying = false;
     final path = t.filePath;
     if (path == null) {
       _onChanged();

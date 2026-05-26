@@ -9,13 +9,15 @@ import '../widgets/sonar_mark.dart';
 
 class LibraryScreen extends StatefulWidget {
   final List<Track> tracks;
+  final int archivedCount;
   final String? currentId;
   final bool playing;
   final void Function(Track) onOpenTrack;
   final void Function(Track) onPlay;
-  final void Function(Track) onDelete;
-  final Future<void> Function() onClearFinished;
+  final void Function(Track) onArchive;
+  final Future<void> Function() onArchiveFinished;
   final VoidCallback onSearch;
+  final VoidCallback onOpenArchive;
   /// Returns the live progress listenable for a downloading track.
   /// Called only for `TrackStatus.downloading` rows.
   final ValueListenable<DownloadProgress?> Function(String trackId)?
@@ -24,13 +26,15 @@ class LibraryScreen extends StatefulWidget {
   const LibraryScreen({
     super.key,
     required this.tracks,
+    required this.archivedCount,
     required this.currentId,
     required this.playing,
     required this.onOpenTrack,
     required this.onPlay,
-    required this.onDelete,
-    required this.onClearFinished,
+    required this.onArchive,
+    required this.onArchiveFinished,
     required this.onSearch,
+    required this.onOpenArchive,
     this.downloadProgressFor,
   });
 
@@ -49,28 +53,28 @@ class _LibraryScreenState extends State<LibraryScreen> {
       case _TrackAction.share:
         await Share.share(t.shareUrl, subject: t.title);
         break;
-      case _TrackAction.delete:
-        widget.onDelete(t);
+      case _TrackAction.archive:
+        widget.onArchive(t);
         break;
       case null:
         break;
     }
   }
 
-  Future<void> _confirmClearFinished(int count) async {
+  Future<void> _confirmArchiveFinished(int count) async {
     final result = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AuroraTheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(
-          'Clear finished podcasts?',
+          'Archive finished podcasts?',
           style: AuroraTheme.display(size: 18, weight: FontWeight.w700, letterSpacing: -0.3),
         ),
         content: Text(
           count == 1
-              ? 'This will permanently delete 1 finished podcast.'
-              : 'This will permanently delete $count finished podcasts.',
+              ? 'This moves 1 finished podcast to the archive.'
+              : 'This moves $count finished podcasts to the archive.',
           style: AuroraTheme.body(size: 13, color: AuroraTheme.muted, height: 1.45),
         ),
         actions: [
@@ -84,18 +88,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             child: Text(
-              'Delete',
+              'Archive',
               style: AuroraTheme.body(
                 size: 13,
                 weight: FontWeight.w700,
-                color: const Color(0xFFFF6E80),
+                color: AuroraTheme.accent,
               ),
             ),
           ),
         ],
       ),
     );
-    if (result == true) await widget.onClearFinished();
+    if (result == true) await widget.onArchiveFinished();
   }
 
   @override
@@ -121,9 +125,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 ),
                 if (finishedCount > 0)
                   IconButton(
-                    onPressed: () => _confirmClearFinished(finishedCount),
-                    tooltip: 'Clear finished',
-                    icon: const Icon(Icons.delete_sweep_outlined, color: AuroraTheme.text, size: 21),
+                    onPressed: () => _confirmArchiveFinished(finishedCount),
+                    tooltip: 'Archive finished',
+                    icon: const Icon(Icons.archive_outlined, color: AuroraTheme.text, size: 21),
+                  ),
+                if (widget.archivedCount > 0)
+                  IconButton(
+                    onPressed: widget.onOpenArchive,
+                    tooltip: 'View archive',
+                    icon: const Icon(Icons.inventory_2_outlined, color: AuroraTheme.text, size: 21),
                   ),
               ],
             ),
@@ -199,7 +209,7 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-enum _TrackAction { share, delete }
+enum _TrackAction { share, archive }
 
 class _TrackActionsSheet extends StatelessWidget {
   final Track track;
@@ -236,10 +246,9 @@ class _TrackActionsSheet extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             _ActionRow(
-              icon: Icons.delete_outline_rounded,
-              label: 'Delete from library',
-              destructive: true,
-              onTap: () => Navigator.of(context).pop(_TrackAction.delete),
+              icon: Icons.archive_outlined,
+              label: 'Archive',
+              onTap: () => Navigator.of(context).pop(_TrackAction.archive),
             ),
           ],
         ),
@@ -252,17 +261,15 @@ class _ActionRow extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  final bool destructive;
   const _ActionRow({
     required this.icon,
     required this.label,
     required this.onTap,
-    this.destructive = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = destructive ? const Color(0xFFFF6E80) : AuroraTheme.text;
+    const color = AuroraTheme.text;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),

@@ -21,7 +21,9 @@ class NowPlayingScreen extends StatefulWidget {
   final ValueChanged<double> onSeek;
   final VoidCallback onCycleSpeed;
   final void Function(Duration?) onPickSleepTimer;
-  final VoidCallback onDelete;
+  /// Invoked from the "Archive" action for ready tracks, and from the
+  /// "Delete" button in the failed-download body.
+  final VoidCallback onArchive;
   /// Live progress for downloading tracks. Ignored when status is ready.
   final ValueListenable<DownloadProgress?>? downloadProgress;
   final VoidCallback? onCancelDownload;
@@ -43,7 +45,7 @@ class NowPlayingScreen extends StatefulWidget {
     required this.onSeek,
     required this.onCycleSpeed,
     required this.onPickSleepTimer,
-    required this.onDelete,
+    required this.onArchive,
     this.downloadProgress,
     this.onCancelDownload,
     this.onRetryDownload,
@@ -123,7 +125,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             _Header(
               track: track,
               onClose: widget.onClose,
-              onDelete: () => _confirmDelete(context),
+              onArchive: () => _confirmArchive(context),
               onShare: () => Share.share(track.shareUrl, subject: track.title),
               ccOn: _ccOn,
               ccAvailable: subtitleAvailable,
@@ -161,7 +163,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   downloadProgress: widget.downloadProgress,
                   onCancelDownload: widget.onCancelDownload,
                   onRetryDownload: widget.onRetryDownload,
-                  onDelete: widget.onDelete,
+                  onArchive: widget.onArchive,
                 ),
               ),
             ),
@@ -171,20 +173,20 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
-  Future<void> _confirmDelete(BuildContext context) async {
+  Future<void> _confirmArchive(BuildContext context) async {
     final result = await showModalBottomSheet<bool>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => _DeleteConfirmSheet(track: widget.track),
+      builder: (ctx) => _ArchiveConfirmSheet(track: widget.track),
     );
-    if (result == true) widget.onDelete();
+    if (result == true) widget.onArchive();
   }
 }
 
 class _Header extends StatelessWidget {
   final Track track;
   final VoidCallback onClose;
-  final VoidCallback onDelete;
+  final VoidCallback onArchive;
   final VoidCallback onShare;
   final bool ccOn;
   final bool ccAvailable;
@@ -193,7 +195,7 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.track,
     required this.onClose,
-    required this.onDelete,
+    required this.onArchive,
     required this.onShare,
     required this.ccOn,
     required this.ccAvailable,
@@ -251,7 +253,7 @@ class _Header extends StatelessWidget {
               size: 24,
             ),
           ),
-        _MoreMenu(onDelete: onDelete, onShare: onShare),
+        _MoreMenu(onArchive: onArchive, onShare: onShare),
       ],
     );
     return Padding(
@@ -462,7 +464,7 @@ class _BodyForStatus extends StatelessWidget {
   final ValueListenable<DownloadProgress?>? downloadProgress;
   final VoidCallback? onCancelDownload;
   final VoidCallback? onRetryDownload;
-  final VoidCallback onDelete;
+  final VoidCallback onArchive;
 
   const _BodyForStatus({
     required this.track,
@@ -477,7 +479,7 @@ class _BodyForStatus extends StatelessWidget {
     required this.downloadProgress,
     required this.onCancelDownload,
     required this.onRetryDownload,
-    required this.onDelete,
+    required this.onArchive,
   });
 
   @override
@@ -494,7 +496,7 @@ class _BodyForStatus extends StatelessWidget {
         return _FailedBody(
           errorMessage: track.errorMessage ?? 'Unknown error',
           onRetry: onRetryDownload,
-          onDelete: onDelete,
+          onDelete: onArchive,
         );
       case TrackStatus.ready:
         return _ReadyBody(
@@ -1062,9 +1064,9 @@ class _SleepTimerSheet extends StatelessWidget {
 }
 
 class _MoreMenu extends StatelessWidget {
-  final VoidCallback onDelete;
+  final VoidCallback onArchive;
   final VoidCallback onShare;
-  const _MoreMenu({required this.onDelete, required this.onShare});
+  const _MoreMenu({required this.onArchive, required this.onShare});
 
   @override
   Widget build(BuildContext context) {
@@ -1078,7 +1080,7 @@ class _MoreMenu extends StatelessWidget {
       offset: const Offset(0, 40),
       onSelected: (v) {
         if (v == 'share') onShare();
-        if (v == 'delete') onDelete();
+        if (v == 'archive') onArchive();
       },
       itemBuilder: (ctx) => [
         PopupMenuItem(
@@ -1093,13 +1095,13 @@ class _MoreMenu extends StatelessWidget {
           ),
         ),
         PopupMenuItem(
-          value: 'delete',
+          value: 'archive',
           child: Row(
             children: [
-              const Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFFF6E80)),
+              const Icon(Icons.archive_outlined, size: 18, color: AuroraTheme.text),
               const SizedBox(width: 10),
-              Text('Delete',
-                  style: AuroraTheme.body(size: 14, weight: FontWeight.w600, color: const Color(0xFFFF6E80))),
+              Text('Archive',
+                  style: AuroraTheme.body(size: 14, weight: FontWeight.w600)),
             ],
           ),
         ),
@@ -1108,9 +1110,9 @@ class _MoreMenu extends StatelessWidget {
   }
 }
 
-class _DeleteConfirmSheet extends StatelessWidget {
+class _ArchiveConfirmSheet extends StatelessWidget {
   final Track track;
-  const _DeleteConfirmSheet({required this.track});
+  const _ArchiveConfirmSheet({required this.track});
 
   @override
   Widget build(BuildContext context) {
@@ -1137,9 +1139,8 @@ class _DeleteConfirmSheet extends StatelessWidget {
             Text(track.channel, style: AuroraTheme.body(size: 12, color: AuroraTheme.muted)),
             const SizedBox(height: 16),
             _ConfirmRow(
-              icon: Icons.delete_outline_rounded,
-              label: 'Delete from library',
-              destructive: true,
+              icon: Icons.archive_outlined,
+              label: 'Archive',
               onTap: () => Navigator.of(context).pop(true),
             ),
             const SizedBox(height: 4),
@@ -1159,17 +1160,15 @@ class _ConfirmRow extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  final bool destructive;
   const _ConfirmRow({
     required this.icon,
     required this.label,
     required this.onTap,
-    this.destructive = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = destructive ? const Color(0xFFFF6E80) : AuroraTheme.text;
+    const color = AuroraTheme.text;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
