@@ -226,7 +226,17 @@ class _Header extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 2),
-        Text(track.channel, style: AuroraTheme.body(size: 12, weight: FontWeight.w600)),
+        // Article-to-podcast tracks store the byline (sometimes a whole
+        // paragraph) in `channel`. Clamp to a single line here so it can't
+        // push the body off-screen — the full text shows in the title block
+        // below the artwork anyway.
+        Text(
+          track.channel,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: AuroraTheme.body(size: 12, weight: FontWeight.w600),
+        ),
       ],
     );
     final leftCluster = Row(
@@ -437,12 +447,19 @@ class _TitleBlock extends StatelessWidget {
         children: [
           Text(
             track.title,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
             style: AuroraTheme.display(size: 20, weight: FontWeight.w700, letterSpacing: -0.4)
                 .copyWith(height: 1.15),
           ),
           const SizedBox(height: 6),
+          // Article tracks put the byline in `channel`. Allow a couple of
+          // lines but not the whole paragraph — otherwise the body below
+          // gets pushed off-screen.
           Text(
             track.channel,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: AuroraTheme.body(size: 13, weight: FontWeight.w600, color: AuroraTheme.muted),
           ),
         ],
