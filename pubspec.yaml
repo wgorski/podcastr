@@ -1,7 +1,7 @@
 name: podcastr
 description: Podcastr — Aurora-themed audio library (Flutter port of the design prototype).
 publish_to: "none"
-version: 0.5.1
+version: 0.7.0
 
 environment:
   sdk: ">=3.6.0 <4.0.0"

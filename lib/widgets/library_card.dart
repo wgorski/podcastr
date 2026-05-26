@@ -32,6 +32,10 @@ class LibraryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Highlight the card whose track is loaded in the player so the user
+    // can spot it at a glance in a long library — pairs with the equalizer
+    // badge in the top-left.
+    final highlighted = isCurrent && track.status == TrackStatus.ready;
     return GestureDetector(
       onTap: onOpen,
       onLongPress: onLongPress,
@@ -40,7 +44,19 @@ class LibraryCard extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(AuroraTheme.cardRadius),
           color: AuroraTheme.surface,
-          border: Border.all(color: AuroraTheme.border, width: 1),
+          border: Border.all(
+            color: highlighted ? AuroraTheme.accent : AuroraTheme.border,
+            width: highlighted ? 2 : 1,
+          ),
+          boxShadow: highlighted
+              ? [
+                  BoxShadow(
+                    color: AuroraTheme.accent.withValues(alpha: 0.30),
+                    blurRadius: 18,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : null,
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(AuroraTheme.cardRadius),
