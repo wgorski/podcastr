@@ -134,21 +134,26 @@ class JinaReader {
     s = s.replaceAll(RegExp(r'```[\s\S]*?```'), '');
     // Indented code blocks (4+ leading spaces on every line of a run)
     s = s.replaceAll(RegExp(r'(?:^|\n)(?: {4,}[^\n]*\n?)+'), '\n');
+    // Dart's replaceAll(RegExp, replacement) treats $1 as a literal — only
+    // replaceAllMapped expands backreferences. The whole point of these
+    // substitutions is to keep the visible text and drop the syntax, so we
+    // have to use replaceAllMapped.
     // Inline code
-    s = s.replaceAll(RegExp(r'`([^`]+)`'), r'$1');
+    s = s.replaceAllMapped(RegExp(r'`([^`]+)`'), (m) => m[1]!);
     // Images
     s = s.replaceAll(RegExp(r'!\[[^\]]*\]\([^)]*\)'), '');
     // Links [text](url) → text
-    s = s.replaceAll(RegExp(r'\[([^\]]*)\]\(([^)]*)\)'), r'$1');
+    s = s.replaceAllMapped(RegExp(r'\[([^\]]*)\]\(([^)]*)\)'), (m) => m[1]!);
     // Reference-style links / image refs
-    s = s.replaceAll(RegExp(r'\[([^\]]+)\]\[[^\]]*\]'), r'$1');
+    s = s.replaceAllMapped(RegExp(r'\[([^\]]+)\]\[[^\]]*\]'), (m) => m[1]!);
     // Setext + ATX headings — drop the markers, keep the text
     s = s.replaceAll(RegExp(r'^#{1,6}\s+', multiLine: true), '');
     s = s.replaceAll(RegExp(r'^(=+|-+)\s*$', multiLine: true), '');
     // Bold / italic / strike
-    s = s.replaceAll(RegExp(r'(\*\*|__)(.+?)\1'), r'$2');
-    s = s.replaceAll(RegExp(r'(?<!\w)([*_])(.+?)\1(?!\w)'), r'$2');
-    s = s.replaceAll(RegExp(r'~~(.+?)~~'), r'$1');
+    s = s.replaceAllMapped(RegExp(r'(\*\*|__)(.+?)\1'), (m) => m[2]!);
+    s = s.replaceAllMapped(
+        RegExp(r'(?<!\w)([*_])(.+?)\1(?!\w)'), (m) => m[2]!);
+    s = s.replaceAllMapped(RegExp(r'~~(.+?)~~'), (m) => m[1]!);
     // Blockquotes
     s = s.replaceAll(RegExp(r'^>\s?', multiLine: true), '');
     // List bullets / numbering
