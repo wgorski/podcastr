@@ -1,7 +1,7 @@
 name: podcastr
 description: Podcastr — Aurora-themed audio library (Flutter port of the design prototype).
 publish_to: "none"
-version: 0.7.0
+version: 0.8.0
 
 environment:
   sdk: ">=3.6.0 <4.0.0"
@@ -26,6 +26,13 @@ dependencies:
   just_audio_background: ^0.0.1-beta.13
   # Native share sheet (Share the original YouTube URL out of the app)
   share_plus: ^10.1.4
+  # HTTP client for hitting the Jina Reader API and the ElevenLabs TTS API
+  http: ^1.2.2
+  # Headless WebView used as a fallback when Jina Reader is unreachable — we
+  # load the article in a hidden browser and run Mozilla Readability.js
+  # against the live DOM. flutter_inappwebview is the cleanest path because
+  # HeadlessInAppWebView doesn't need a widget-tree attachment.
+  flutter_inappwebview: ^6.1.5
 
 dev_dependencies:
   flutter_lints: ^4.0.0
@@ -34,3 +41,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/readability.js
