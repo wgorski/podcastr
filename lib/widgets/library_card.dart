@@ -36,6 +36,10 @@ class LibraryCard extends StatelessWidget {
     // can spot it at a glance in a long library — pairs with the equalizer
     // badge in the top-left.
     final highlighted = isCurrent && track.status == TrackStatus.ready;
+    // Already-listened cards fade to 40% so they read as consumed at a
+    // glance. The outer border / accent halo stay full opacity so an
+    // active-but-finished card still shows the highlight.
+    final finished = track.finished && track.status == TrackStatus.ready;
     return GestureDetector(
       onTap: onOpen,
       onLongPress: onLongPress,
@@ -60,7 +64,9 @@ class LibraryCard extends StatelessWidget {
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(AuroraTheme.cardRadius),
-          child: Column(
+          child: Opacity(
+            opacity: finished ? 0.4 : 1.0,
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -82,14 +88,6 @@ class LibraryCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  // "Already listened" scrim so finished tracks read at a
-                  // glance as already-consumed, without hiding the artwork.
-                  if (track.finished && track.status == TrackStatus.ready)
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: Container(color: Colors.black.withValues(alpha: 0.35)),
-                      ),
-                    ),
                   Positioned(
                     left: 14,
                     right: 70,
@@ -137,6 +135,7 @@ class LibraryCard extends StatelessWidget {
                 ),
               ),
             ],
+          ),
           ),
         ),
       ),
