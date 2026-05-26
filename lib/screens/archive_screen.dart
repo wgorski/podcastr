@@ -1,19 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 import '../models/track.dart';
 import '../theme/aurora_theme.dart';
 import '../widgets/thumbnail.dart';
 
 /// Read-only list of archived tracks, sorted by download time (newest first).
-/// The only mutating action is "Remove permanently" — that's the spec.
+/// Long-press a row to act on it: Unarchive (return it to the library), Share
+/// (the original URL), or Delete (permanent — only available here per the spec).
 class ArchiveScreen extends StatelessWidget {
   final List<Track> tracks;
   final VoidCallback onClose;
+  final void Function(Track) onUnarchive;
   final Future<void> Function(Track) onDeletePermanently;
 
   const ArchiveScreen({
     super.key,
     required this.tracks,
     required this.onClose,
+    required this.onUnarchive,
     required this.onDeletePermanently,
   });
 
@@ -25,6 +29,28 @@ class ArchiveScreen extends StatelessWidget {
       return bv.compareTo(av);
     });
     return list;
+  }
+
+  Future<void> _showActions(BuildContext context, Track t) async {
+    final result = await showModalBottomSheet<_ArchiveAction>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _ArchiveActionsSheet(track: t),
+    );
+    if (!context.mounted) return;
+    switch (result) {
+      case _ArchiveAction.unarchive:
+        onUnarchive(t);
+        break;
+      case _ArchiveAction.share:
+        await Share.share(t.shareUrl, subject: t.title);
+        break;
+      case _ArchiveAction.delete:
+        await _confirmDelete(context, t);
+        break;
+      case null:
+        break;
+    }
   }
 
   Future<void> _confirmDelete(BuildContext context, Track t) async {
@@ -115,7 +141,7 @@ class ArchiveScreen extends StatelessWidget {
                     final t = list[i];
                     return _ArchiveRow(
                       track: t,
-                      onDelete: () => _confirmDelete(context, t),
+                      onLongPress: () => _showActions(context, t),
                     );
                   },
                 ),
@@ -129,58 +155,56 @@ class ArchiveScreen extends StatelessWidget {
 
 class _ArchiveRow extends StatelessWidget {
   final Track track;
-  final VoidCallback onDelete;
-  const _ArchiveRow({required this.track, required this.onDelete});
+  final VoidCallback onLongPress;
+  const _ArchiveRow({required this.track, required this.onLongPress});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      decoration: BoxDecoration(
-        color: AuroraTheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AuroraTheme.border, width: 1),
-      ),
-      padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
-      child: Row(
-        children: [
-          SquareArt(track: track, size: 56, radius: 10),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  track.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: AuroraTheme.body(size: 14, weight: FontWeight.w700, height: 1.25),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  track.channel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AuroraTheme.body(size: 12, color: AuroraTheme.muted),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  _subtitleFor(track),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AuroraTheme.mono(size: 10, color: AuroraTheme.dim),
-                ),
-              ],
+    return GestureDetector(
+      onLongPress: onLongPress,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        decoration: BoxDecoration(
+          color: AuroraTheme.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AuroraTheme.border, width: 1),
+        ),
+        padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
+        child: Row(
+          children: [
+            SquareArt(track: track, size: 56, radius: 10),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    track.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: AuroraTheme.body(size: 14, weight: FontWeight.w700, height: 1.25),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    track.channel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AuroraTheme.body(size: 12, color: AuroraTheme.muted),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _subtitleFor(track),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AuroraTheme.mono(size: 10, color: AuroraTheme.dim),
+                  ),
+                ],
+              ),
             ),
-          ),
-          IconButton(
-            tooltip: 'Remove permanently',
-            onPressed: onDelete,
-            icon: const Icon(Icons.delete_outline_rounded,
-                color: Color(0xFFFF6E80), size: 22),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -207,6 +231,93 @@ class _ArchiveRow extends StatelessWidget {
     if (diff.inHours >= 1) return '${diff.inHours}h ago';
     if (diff.inMinutes >= 1) return '${diff.inMinutes}m ago';
     return 'just now';
+  }
+}
+
+enum _ArchiveAction { unarchive, share, delete }
+
+class _ArchiveActionsSheet extends StatelessWidget {
+  final Track track;
+  const _ArchiveActionsSheet({required this.track});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        decoration: BoxDecoration(
+          color: AuroraTheme.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AuroraTheme.border, width: 1),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              track.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: AuroraTheme.body(size: 15, weight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Text(track.channel, style: AuroraTheme.body(size: 12, color: AuroraTheme.muted)),
+            const SizedBox(height: 16),
+            _ActionRow(
+              icon: Icons.unarchive_outlined,
+              label: 'Unarchive',
+              onTap: () => Navigator.of(context).pop(_ArchiveAction.unarchive),
+            ),
+            const SizedBox(height: 4),
+            _ActionRow(
+              icon: Icons.ios_share_rounded,
+              label: 'Share',
+              onTap: () => Navigator.of(context).pop(_ArchiveAction.share),
+            ),
+            const SizedBox(height: 4),
+            _ActionRow(
+              icon: Icons.delete_outline_rounded,
+              label: 'Delete',
+              destructive: true,
+              onTap: () => Navigator.of(context).pop(_ArchiveAction.delete),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool destructive;
+  const _ActionRow({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.destructive = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = destructive ? const Color(0xFFFF6E80) : AuroraTheme.text;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(width: 14),
+            Text(label, style: AuroraTheme.body(size: 14, weight: FontWeight.w600, color: color)),
+          ],
+        ),
+      ),
+    );
   }
 }
 

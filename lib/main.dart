@@ -369,6 +369,20 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     await _persist();
   }
 
+  /// Restore an archived track to the library. The file is already on disk,
+  /// so this is a one-field flip plus a persist.
+  void _unarchiveTrack(Track t) {
+    if (!t.archived) return;
+    final restored = t.copyWith(archived: false);
+    setState(() {
+      _tracks = [
+        for (final x in _tracks) x.id == t.id ? restored : x,
+      ];
+      if (_viewedTrack?.id == t.id) _viewedTrack = restored;
+    });
+    _persist();
+  }
+
   /// Remove a track from the archive: deletes the persisted row, drops the
   /// resume point, and removes the audio file from disk. Only invoked from
   /// the archive view per the spec.
@@ -670,6 +684,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                     child: ArchiveScreen(
                       tracks: archivedTracks,
                       onClose: () => setState(() => _screen = _Screen.library),
+                      onUnarchive: _unarchiveTrack,
                       onDeletePermanently: _permanentlyDeleteTrack,
                     ),
                   ),
