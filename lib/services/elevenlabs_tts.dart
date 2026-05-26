@@ -35,7 +35,10 @@ class ElevenLabsTts {
   /// long.
   static const int chunkLimit = 3000;
   static const String _baseUrl = 'https://api.elevenlabs.io/v1/text-to-speech';
-  static const String defaultVoiceId = '21m00Tcm4TlvDq8ikWAM'; // "Rachel"
+  // "Aria" — one of the premade voices that ElevenLabs keeps in the free
+  // tier. The older "Rachel" voice (21m00Tcm4TlvDq8ikWAM) was moved to the
+  // Voice Library, which free API keys can't synthesize.
+  static const String defaultVoiceId = '9BWtsMINqrJLrRacOk9x';
   static const String defaultModelId = 'eleven_multilingual_v2';
 
   final http.Client _client;
