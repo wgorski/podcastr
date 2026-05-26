@@ -38,9 +38,18 @@ class JinaReader {
           .get(uri, headers: const {
             'Accept': 'application/json',
             'User-Agent': _userAgent,
-            // Ask the reader to skip its image-captioning pass — we don't
-            // use it and it slows the response down noticeably.
+            // Skip the image-captioning pass — we don't use it and it
+            // slows the response down noticeably.
             'X-Retain-Images': 'none',
+            // Drop the obvious site chrome before Jina renders to
+            // markdown. We still post-process below because these
+            // selectors don't catch every CMS' boilerplate.
+            'X-Remove-Selector':
+                'nav, header, footer, aside, form, [role="navigation"], '
+                    '[role="banner"], [role="contentinfo"], '
+                    '[role="complementary"], .nav, .navigation, .menu, '
+                    '.sidebar, .footer, .related, .ads, .ad, .advert, '
+                    '.advertisement',
           })
           .timeout(const Duration(seconds: 25));
     } on TimeoutException {
@@ -69,9 +78,12 @@ class JinaReader {
     if (markdown.isEmpty) {
       throw const JinaException('Jina Reader extracted no content.');
     }
-    final text = _stripMarkdown(markdown);
-    if (text.length < 80) {
-      throw const JinaException('Jina Reader returned too little text.');
+    final text = extractArticleText(markdown);
+    // News articles in our target band sit comfortably > 250 chars after
+    // boilerplate stripping. If we're under that, Jina's heuristics most
+    // likely got nav menus + a teaser; let Readability.js have a try.
+    if (text.length < 250) {
+      throw const JinaException('Jina Reader returned too little prose.');
     }
 
     final canonical = (data['url'] as String?)?.trim();
@@ -103,10 +115,20 @@ class JinaReader {
     return m?.group(1);
   }
 
+  /// Public so tests can exercise it against fixture markdown. Strips
+  /// markdown syntax to plain text and then keeps only the longest
+  /// contiguous run of prose paragraphs — a tight heuristic against the
+  /// nav / footer / "related articles" cruft that Jina sometimes leaves
+  /// inside the markdown body.
+  static String extractArticleText(String markdown) {
+    final stripped = stripMarkdownSyntax(markdown);
+    return _longestProseRun(stripped);
+  }
+
   /// Best-effort Markdown → plain text. The ElevenLabs voice handles
   /// regular prose well; we just need to strip syntactic noise that would
   /// otherwise be read aloud as "asterisk asterisk" / "open bracket".
-  static String _stripMarkdown(String md) {
+  static String stripMarkdownSyntax(String md) {
     var s = md;
     // Fenced code blocks
     s = s.replaceAll(RegExp(r'```[\s\S]*?```'), '');
@@ -135,12 +157,84 @@ class JinaReader {
     // Tables — drop the alignment row and pipe characters
     s = s.replaceAll(RegExp(r'^\s*\|?[\s\-:|]+\|?\s*$', multiLine: true), '');
     s = s.replaceAll(RegExp(r'\s*\|\s*'), ' ');
-    // Horizontal rules
-    s = s.replaceAll(RegExp(r'^\s*[-*_]{3,}\s*$', multiLine: true), '');
+    // Horizontal rules: ***, ---, ___ — also with spaces between the
+    // chars like the BBC site's "* * *" separators.
+    s = s.replaceAll(
+        RegExp(r'^\s*(?:[-*_]\s*){3,}$', multiLine: true), '');
     // Collapse runs of blank lines
     s = s.replaceAll(RegExp(r'\n{3,}'), '\n\n');
     // Trim trailing whitespace on each line
     s = s.split('\n').map((l) => l.trimRight()).join('\n');
     return s.trim();
+  }
+
+  /// Find the longest contiguous run of "prose-shaped" paragraphs in
+  /// [stripped] and return them joined back together. Allows up to one
+  /// non-prose paragraph (a section heading, an image caption) inside a
+  /// run so longer articles with subheadings survive.
+  static String _longestProseRun(String stripped) {
+    final blocks = stripped
+        .split(RegExp(r'\n\s*\n'))
+        .map((b) => b.replaceAll(RegExp(r'\s+'), ' ').trim())
+        .where((b) => b.isNotEmpty)
+        .toList();
+    if (blocks.isEmpty) return '';
+
+    final isProse = blocks.map(_looksLikeProse).toList();
+
+    // Greedy walk: track the best (start, endExclusive, prose count) that
+    // accumulated while tolerating at most one consecutive non-prose gap.
+    var bestStart = -1;
+    var bestEndAfterLastProse = -1;
+    var bestProse = 0;
+
+    var curStart = -1;
+    var curEndAfterLastProse = -1;
+    var curProse = 0;
+    var gapsSinceLastProse = 999;
+
+    void flushIfBest() {
+      if (curProse > bestProse) {
+        bestProse = curProse;
+        bestStart = curStart;
+        bestEndAfterLastProse = curEndAfterLastProse;
+      }
+    }
+
+    for (var i = 0; i < blocks.length; i++) {
+      if (isProse[i]) {
+        if (curStart < 0) curStart = i;
+        curProse++;
+        curEndAfterLastProse = i + 1;
+        gapsSinceLastProse = 0;
+      } else if (curStart >= 0 && gapsSinceLastProse == 0) {
+        // One-block gap allowed (e.g. a "## Section" heading).
+        gapsSinceLastProse = 1;
+      } else {
+        flushIfBest();
+        curStart = -1;
+        curEndAfterLastProse = -1;
+        curProse = 0;
+        gapsSinceLastProse = 999;
+      }
+    }
+    flushIfBest();
+
+    if (bestProse < 1 || bestStart < 0) return '';
+    return blocks.sublist(bestStart, bestEndAfterLastProse).join('\n\n');
+  }
+
+  /// A paragraph "looks like prose" when it has enough length, real
+  /// terminal punctuation, and isn't dominated by short capitalised words
+  /// (a near-perfect signature of nav menus / topic tag clouds).
+  static bool _looksLikeProse(String s) {
+    if (s.length < 80) return false;
+    if (!RegExp(r'[.!?]').hasMatch(s)) return false;
+    final words = s.split(RegExp(r'\s+'));
+    if (words.length < 14) return false;
+    final shortCapWords = words.where((w) =>
+        w.length <= 6 && RegExp(r'^[A-Z][A-Za-z0-9]*$').hasMatch(w)).length;
+    if (shortCapWords / words.length > 0.6) return false;
+    return true;
   }
 }

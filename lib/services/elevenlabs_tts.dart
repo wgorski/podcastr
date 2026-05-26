@@ -61,7 +61,7 @@ class ElevenLabsTts {
       throw const TtsException('Article text is empty.');
     }
 
-    final chunks = _chunkText(clean, chunkLimit);
+    final chunks = chunkText(clean, chunkLimit);
     final file = File(outputPath);
     await file.parent.create(recursive: true);
     if (await file.exists()) await file.delete();
@@ -179,7 +179,8 @@ class ElevenLabsTts {
   /// Split [text] into chunks of at most [limit] characters, preferring
   /// paragraph then sentence boundaries. Greedy packer: we keep appending
   /// segments to the current chunk until the next one would overflow.
-  static List<String> _chunkText(String text, int limit) {
+  /// Public so tests can verify the boundary-finding logic directly.
+  static List<String> chunkText(String text, int limit) {
     if (text.length <= limit) return [text];
 
     final segments = <String>[];
