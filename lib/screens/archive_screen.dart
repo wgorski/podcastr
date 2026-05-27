@@ -4,7 +4,8 @@ import '../models/track.dart';
 import '../theme/aurora_theme.dart';
 import '../widgets/thumbnail.dart';
 
-/// Read-only list of archived tracks, sorted by download time (newest first).
+/// Read-only list of archived tracks, sorted by archive time (newest first;
+/// falls back to download time for rows archived before that was tracked).
 /// Long-press a row to act on it: Unarchive (return it to the library), Share
 /// (the original URL), or Delete (permanent — only available here per the spec).
 class ArchiveScreen extends StatelessWidget {
@@ -24,8 +25,8 @@ class ArchiveScreen extends StatelessWidget {
   List<Track> get _sorted {
     final list = [...tracks];
     list.sort((a, b) {
-      final av = a.downloadedAtMs ?? 0;
-      final bv = b.downloadedAtMs ?? 0;
+      final av = a.archivedAtMs ?? a.downloadedAtMs ?? 0;
+      final bv = b.archivedAtMs ?? b.downloadedAtMs ?? 0;
       return bv.compareTo(av);
     });
     return list;

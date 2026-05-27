@@ -43,6 +43,10 @@ class Track {
   /// Milliseconds since epoch — captured when the download completes. Null for
   /// rows persisted before this field existed; treated as 0 for sort order.
   final int? downloadedAtMs;
+  /// Milliseconds since epoch — captured when the track is moved to the
+  /// archive. Drives the archive view's ordering (newest archived first).
+  /// Null for tracks never archived or persisted before this field existed.
+  final int? archivedAtMs;
 
   const Track({
     required this.id,
@@ -64,6 +68,7 @@ class Track {
     this.finished = false,
     this.archived = false,
     this.downloadedAtMs,
+    this.archivedAtMs,
   });
 
   int get seed {
@@ -94,6 +99,7 @@ class Track {
     bool? finished,
     bool? archived,
     int? downloadedAtMs,
+    int? archivedAtMs,
   }) {
     return Track(
       id: id ?? this.id,
@@ -116,6 +122,7 @@ class Track {
       finished: finished ?? this.finished,
       archived: archived ?? this.archived,
       downloadedAtMs: downloadedAtMs ?? this.downloadedAtMs,
+      archivedAtMs: archivedAtMs ?? this.archivedAtMs,
     );
   }
 
@@ -139,6 +146,7 @@ class Track {
         'finished': finished,
         'archived': archived,
         'downloadedAtMs': downloadedAtMs,
+        'archivedAtMs': archivedAtMs,
       };
 
   factory Track.fromJson(Map<String, dynamic> j) => Track(
@@ -162,6 +170,7 @@ class Track {
         finished: (j['finished'] as bool?) ?? false,
         archived: (j['archived'] as bool?) ?? false,
         downloadedAtMs: j['downloadedAtMs'] as int?,
+        archivedAtMs: j['archivedAtMs'] as int?,
       );
 }
 

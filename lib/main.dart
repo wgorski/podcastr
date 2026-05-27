@@ -344,7 +344,10 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
       return;
     }
     final wasCurrent = _current?.id == t.id;
-    final updated = t.copyWith(archived: true);
+    final updated = t.copyWith(
+      archived: true,
+      archivedAtMs: DateTime.now().millisecondsSinceEpoch,
+    );
     final next = [
       for (final x in _tracks) x.id == t.id ? updated : x,
     ];
