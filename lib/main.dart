@@ -469,7 +469,34 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     }
   }
 
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: AuroraTheme.surface,
+          content: Text(
+            message,
+            style: AuroraTheme.body(size: 13, weight: FontWeight.w600),
+          ),
+        ),
+      );
+  }
+
   Future<void> _onStartDownload(Track downloading) async {
+    // The track id is the YouTube video id, so a matching id means this video
+    // is already in the library (e.g. re-shared while still downloading).
+    // Adding it again would create a duplicate row — bail and tell the user.
+    if (_tracks.any((t) => t.id == downloading.id)) {
+      setState(() {
+        _screen = _Screen.library;
+        _pendingDownloadUrl = null;
+      });
+      _showSnack('This podcast is already added.');
+      return;
+    }
     // Kick off the download FIRST. start()'s synchronous prefix inserts the
     // per-track ValueNotifier into DownloadManager._active before any await,
     // which means the library card subscribes to a live notifier on its
