@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/track.dart';
+import '../services/gemini.dart';
 import '../services/youtube_downloader.dart';
 import '../theme/aurora_theme.dart';
 import '../widgets/library_card.dart';
@@ -46,14 +47,20 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _showActions(Track t) async {
+    final geminiAvailable = await Gemini.isInstalled();
+    if (!mounted) return;
     final result = await showModalBottomSheet<_TrackAction>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => _TrackActionsSheet(track: t),
+      builder: (ctx) =>
+          _TrackActionsSheet(track: t, geminiAvailable: geminiAvailable),
     );
     switch (result) {
       case _TrackAction.share:
         await Share.share(t.shareUrl, subject: t.title);
+        break;
+      case _TrackAction.summarizeGemini:
+        await Gemini.summarize(t.shareUrl);
         break;
       case _TrackAction.archive:
         widget.onArchive(t);
@@ -216,11 +223,15 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-enum _TrackAction { share, archive }
+enum _TrackAction { share, summarizeGemini, archive }
 
 class _TrackActionsSheet extends StatelessWidget {
   final Track track;
-  const _TrackActionsSheet({required this.track});
+  final bool geminiAvailable;
+  const _TrackActionsSheet({
+    required this.track,
+    required this.geminiAvailable,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -251,6 +262,15 @@ class _TrackActionsSheet extends StatelessWidget {
               label: 'Share',
               onTap: () => Navigator.of(context).pop(_TrackAction.share),
             ),
+            if (geminiAvailable) ...[
+              const SizedBox(height: 4),
+              _ActionRow(
+                icon: Icons.auto_awesome_outlined,
+                label: 'Summarize via Gemini',
+                onTap: () =>
+                    Navigator.of(context).pop(_TrackAction.summarizeGemini),
+              ),
+            ],
             const SizedBox(height: 4),
             _ActionRow(
               icon: Icons.archive_outlined,

@@ -93,5 +93,8 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- Visibility for the "Summarize via Gemini" action: lets us detect
+             whether the Gemini app is installed and target a share intent at it. -->
+        <package android:name="com.google.android.apps.bard"/>
     </queries>
 </manifest>

@@ -1,5 +1,8 @@
 package com.wgorski.podcastr
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.content.pm.PackageManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -65,6 +68,12 @@ class MainActivity : AudioServiceActivity() {
                     (call.arguments as? Map<*, *>)?.get("videoId") as? String,
                     result,
                 )
+                "isGeminiInstalled" -> result.success(isGeminiInstalled())
+                "summarizeViaGemini" -> {
+                    val text = (call.arguments as? Map<*, *>)?.get("text") as? String
+                    if (text == null) result.error("ARG", "Missing text", null)
+                    else summarizeViaGemini(text, result)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -230,6 +239,27 @@ class MainActivity : AudioServiceActivity() {
         sink.success(payload)
     }
 
+    private fun isGeminiInstalled(): Boolean = try {
+        packageManager.getPackageInfo(GEMINI_PACKAGE, 0)
+        true
+    } catch (e: PackageManager.NameNotFoundException) {
+        false
+    }
+
+    private fun summarizeViaGemini(text: String, result: MethodChannel.Result) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            setPackage(GEMINI_PACKAGE)
+        }
+        try {
+            startActivity(intent)
+            result.success(null)
+        } catch (e: ActivityNotFoundException) {
+            result.error("NO_GEMINI", "Gemini app not available", null)
+        }
+    }
+
     private fun resolveYoutube(url: String): Map<String, Any?> {
         val r = YoutubeResolver.resolve(url)
         return mapOf(
@@ -247,5 +277,7 @@ class MainActivity : AudioServiceActivity() {
 
     companion object {
         const val TAG_PREFIX = "podcastr.download:"
+        // Standalone Google Gemini app (formerly Bard).
+        const val GEMINI_PACKAGE = "com.google.android.apps.bard"
     }
 }
