@@ -63,12 +63,15 @@ android/app/src/main/kotlin/com/wgorski/podcastr/
 
 ## Conventions & gotchas the assistant should remember
 
-- **Versioning — semver, bump on every change.** The single source of truth
-  is the `version:` field in `pubspec.yaml` (Flutter forwards it to
-  `versionName`). With every change that lands on `main`, bump either the
-  **minor** component (`0.X.0`) for new features / behavior changes, or the
-  **patch** component (`0.0.X`) for bug fixes, refactors, or doc-only
-  touch-ups. Don't skip the bump — even small changes get one. Release APKs
+- **Versioning — semver, bump once per branch/session.** The single source
+  of truth is the `version:` field in `pubspec.yaml` (Flutter forwards it to
+  `versionName`). Treat all the changes in a single branch or Claude Code
+  session as **one** change: bump the version once for the whole unit of
+  work, not once per file or per commit. Bump either the **minor** component
+  (`0.X.0`) for new features / behavior changes, or the **patch** component
+  (`0.0.X`) for bug fixes, refactors, or doc-only touch-ups — and if a
+  session mixes both, the minor bump wins. Don't skip the bump, but don't
+  bump repeatedly within the same session either. Release APKs
   are auto-named `podcastr-${versionName}.apk` via the `outputFileName` hook
   in `android/app/build.gradle.kts`, so the file in
   `build/app/outputs/flutter-apk/` always reflects the current version.
