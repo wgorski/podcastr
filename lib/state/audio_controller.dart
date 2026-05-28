@@ -154,6 +154,11 @@ class AudioController {
       return;
     }
     try {
+      // `setAudioSource` preserves the player's play/pause flag. Loading a new
+      // track while another one is playing would otherwise immediately start
+      // the new source. Pause first unless the caller explicitly asked to play
+      // (e.g. opening a track from the library should not auto-start it).
+      if (!andPlay && _player.playing) await _player.pause();
       final source = AudioSource.uri(
         Uri.file(path),
         tag: MediaItem(

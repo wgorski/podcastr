@@ -272,17 +272,14 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   }
 
   void _openTrack(Track t) {
+    // Navigation is view-only. Don't bind the track into the audio engine
+    // here — whatever's playing should keep playing until the user explicitly
+    // hits play on this track's screen. The play button is wired through
+    // [_playTapped], which loads + plays the viewed track on demand.
     setState(() {
       _viewedTrack = t;
       _screen = _Screen.player;
     });
-    // Skip the load() when this is already the active track — calling
-    // setAudioSource on the same file mid-playback restarts the decoder
-    // and stutters the audio. Same reason the mini-player's "expand" just
-    // pushes the view without touching the audio engine.
-    if (t.status == TrackStatus.ready && _current?.id != t.id) {
-      _selectTrack(t);
-    }
   }
 
   Future<void> _playTapped(Track t) async {
@@ -513,8 +510,6 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
 
   Future<void> _onDownloadCompleted(Track ready) async {
     if (!mounted) return;
-    final wasViewedInPlayer =
-        _screen == _Screen.player && _viewedTrack?.id == ready.id;
     setState(() {
       _tracks = [
         for (final t in _tracks) t.id == ready.id ? ready : t,
@@ -523,19 +518,13 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
         _viewedTrack = ready;
       }
     });
-    // Two cases where we bind this freshly-finished track into the audio
-    // engine on its own:
-    //  1. The player has nothing loaded yet (first-ever track).
-    //  2. The user is currently looking at this very track's now-playing
-    //     screen — they opened it while it was still downloading, so the
-    //     engine still has whatever was playing before. Without this swap,
-    //     pressing the big play button would resume the previous track
-    //     instead of starting the one they're staring at.
+    // Only bind into the audio engine when there's nothing loaded yet (first
+    // track ever). When something else is playing, leave it alone — pressing
+    // play on the freshly-completed track's screen routes through [_playTapped]
+    // and will load it on demand without interrupting the current playback
+    // until the user actually asks for it.
     if (_current == null) {
       await _audio.load(ready);
-    } else if (wasViewedInPlayer && _current!.id != ready.id) {
-      await _audio.load(ready);
-      await _selection.save(ready.id);
     }
     await _persist();
   }
@@ -653,6 +642,12 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                     orElse: () => viewed,
                   );
                   final isReady = fresh.status == TrackStatus.ready;
+                  // The audio engine may still be holding a different track
+                  // (the one playing in the background). Only mirror live
+                  // playback state when the viewed track *is* the engine's
+                  // current — otherwise show an idle, ready-to-start screen.
+                  final isCurrent = _current?.id == fresh.id;
+                  final showLive = isReady && isCurrent;
                   return PopScope(
                     canPop: false,
                     onPopInvokedWithResult: (didPop, _) {
@@ -664,14 +659,14 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                         top: false,
                         child: NowPlayingScreen(
                           track: fresh,
-                          playing: isReady ? _playing : false,
-                          progress: isReady ? _progress : 0.0,
-                          position: isReady ? _audio.position : Duration.zero,
+                          playing: showLive && _playing,
+                          progress: showLive ? _progress : 0.0,
+                          position: showLive ? _audio.position : Duration.zero,
                           speed: _speed,
                           sleepRemaining: _sleepRemaining,
-                          onTogglePlay: _audio.toggle,
+                          onTogglePlay: () => _playTapped(fresh),
                           onClose: dismiss,
-                          onSeek: _audio.seekFraction,
+                          onSeek: showLive ? _audio.seekFraction : (_) {},
                           onCycleSpeed: _cycleSpeed,
                           onPickSleepTimer: _setSleepTimer,
                           downloadProgress: _downloads.progressFor(fresh.id),
