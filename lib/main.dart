@@ -8,19 +8,15 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'models/track.dart';
 import 'screens/archive_screen.dart';
-import 'screens/article_sheet.dart';
 import 'screens/download_sheet.dart';
 import 'screens/library_screen.dart';
 import 'screens/lock_screen.dart';
 import 'screens/now_playing_screen.dart';
 import 'screens/search_screen.dart';
-import 'screens/settings_screen.dart';
-import 'services/article_extractor.dart';
 import 'state/audio_controller.dart';
 import 'state/download_manager.dart';
 import 'state/library_store.dart';
 import 'state/selection_store.dart';
-import 'state/settings_store.dart';
 import 'theme/aurora_theme.dart';
 import 'widgets/mini_player.dart';
 
@@ -76,7 +72,7 @@ class PodcastrApp extends StatelessWidget {
   }
 }
 
-enum _Screen { library, player, search, download, article, lock, archive }
+enum _Screen { library, player, search, download, lock, archive }
 
 class _PodcastrHome extends StatefulWidget {
   const _PodcastrHome();
@@ -110,13 +106,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   Track? _viewedTrack;
 
   String? _pendingDownloadUrl; // YouTube URL captured from a SEND / VIEW intent
-  String? _pendingArticleUrl;  // Non-YouTube URL → article→TTS flow
-  // Bumped whenever we want the ArticleSheet's State to be torn down and
-  // rebuilt (e.g. after the user adds a missing API key in Settings and we
-  // need the sheet to re-evaluate from scratch).
-  int _articleSheetEpoch = 0;
   StreamSubscription<List<SharedMediaFile>>? _intentSub;
-  final _settings = SettingsStore();
 
   // Sleep timer: ticks down regardless of pause state; pauses playback at 0.
   Duration? _sleepRemaining;
@@ -197,21 +187,16 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     ReceiveSharingIntent.instance.reset();
   }
 
-  /// Route a captured URL to the right sheet. YouTube → existing native
-  /// extraction; anything else → article→TTS flow.
+  /// Route a captured URL to the download sheet. Only YouTube links are
+  /// supported; anything else surfaces a snackbar.
   void _dispatchSharedUrl(String url) {
     if (_youtubeUrlRegex.hasMatch(url)) {
       setState(() {
         _pendingDownloadUrl = url;
-        _pendingArticleUrl = null;
         _screen = _Screen.download;
       });
     } else {
-      setState(() {
-        _pendingArticleUrl = url;
-        _pendingDownloadUrl = null;
-        _screen = _Screen.article;
-      });
+      _showSnack('Only YouTube links are supported.');
     }
   }
 
@@ -416,56 +401,6 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     await _persist();
   }
 
-  Future<void> _onStartArticleGeneration(
-    Track downloading,
-    ExtractedArticle article,
-  ) async {
-    final apiKey = await _settings.apiKey();
-    if (apiKey == null) {
-      // The sheet only lets the user reach this state after we confirmed the
-      // key exists, but guard anyway in case they cleared it in a parallel
-      // tab.
-      if (!mounted) return;
-      setState(() {
-        _screen = _Screen.library;
-        _pendingArticleUrl = null;
-      });
-      return;
-    }
-    final voiceId = await _settings.voiceId();
-    if (!mounted) return;
-    final generationFuture = _downloads.startArticleGeneration(
-      track: downloading,
-      article: article,
-      apiKey: apiKey,
-      voiceId: voiceId,
-    );
-    setState(() {
-      _tracks = [downloading, ..._tracks];
-      _screen = _Screen.library;
-      _pendingArticleUrl = null;
-    });
-    await _persist();
-    await generationFuture;
-  }
-
-  Future<void> _openSettings({bool fromArticleSheet = false}) async {
-    if (!mounted) return;
-    final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-    );
-    if (!mounted) return;
-    // If we came from the article sheet with no key, and the user just saved
-    // one, bump the epoch so the sheet's State is rebuilt and re-resolves
-    // (otherwise it'd still be sitting in _Phase.noKey).
-    if (fromArticleSheet && saved == true && _pendingArticleUrl != null) {
-      setState(() {
-        _articleSheetEpoch++;
-        _screen = _Screen.article;
-      });
-    }
-  }
-
   void _showSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -606,7 +541,6 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                 onArchiveFinished: _archiveFinished,
                 onSearch: () => setState(() => _screen = _Screen.search),
                 onOpenArchive: () => setState(() => _screen = _Screen.archive),
-                onOpenSettings: () => _openSettings(),
                 downloadProgressFor: _downloads.progressFor,
               ),
             ),
@@ -737,17 +671,6 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                 }),
                 onStartDownload: _onStartDownload,
               ),
-            if (_screen == _Screen.article && _pendingArticleUrl != null)
-              ArticleSheet(
-                key: ValueKey('$_pendingArticleUrl@$_articleSheetEpoch'),
-                url: _pendingArticleUrl!,
-                onClose: () => setState(() {
-                  _screen = _Screen.library;
-                  _pendingArticleUrl = null;
-                }),
-                onStartGeneration: _onStartArticleGeneration,
-                onOpenSettings: () => _openSettings(fromArticleSheet: true),
-              ),
             if (hasCurrent && _screen == _Screen.lock)
               _FadeIn(
                 child: LockScreen(
@@ -798,11 +721,11 @@ class _PasteUrlDialog extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Add audio from URL',
+            Text('Add audio from YouTube',
                 style: AuroraTheme.display(size: 18, weight: FontWeight.w700, letterSpacing: -0.3)),
             const SizedBox(height: 6),
             Text(
-              'YouTube links extract directly. Article URLs are read aloud via ElevenLabs.',
+              'Paste a YouTube link and it\'ll be extracted to audio.',
               style: AuroraTheme.body(size: 12, color: AuroraTheme.muted, height: 1.4),
             ),
             const SizedBox(height: 14),

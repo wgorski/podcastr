@@ -1,11 +1,8 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
 import '../models/track.dart';
-import '../services/article_extractor.dart';
-import '../services/elevenlabs_tts.dart';
 import '../services/youtube_downloader.dart';
 
 /// Owns the lifecycle of in-flight YouTube audio downloads.
@@ -97,73 +94,6 @@ class DownloadManager {
   /// Re-enqueue a previously failed download. Caller is expected to have
   /// already flipped the row to [TrackStatus.downloading] for UI feedback.
   Future<void> retry(Track downloadingTrack) => start(downloadingTrack);
-
-  /// Generate a podcast from an article via ElevenLabs TTS. Runs in-process
-  /// (no WorkManager), but reuses the same progress notifier infrastructure
-  /// as YouTube downloads so library cards render identically. Article track
-  /// IDs are namespaced ("art-…") so they never collide with YouTube IDs
-  /// in [_active] or the native event stream.
-  Future<void> startArticleGeneration({
-    required Track track,
-    required ExtractedArticle article,
-    required String apiKey,
-    required String voiceId,
-  }) async {
-    if (_active.containsKey(track.id)) return;
-    final filePath = track.filePath;
-    if (filePath == null) {
-      onFailed(track.id, 'No destination path for this article.');
-      return;
-    }
-    _active[track.id] = _Tracked(track: track);
-    _notifierFor(track.id).value = null;
-
-    final tts = ElevenLabsTts();
-    try {
-      final result = await tts.synthesize(
-        text: article.text,
-        apiKey: apiKey,
-        outputPath: filePath,
-        voiceId: voiceId,
-        onProgress: (done, total) {
-          final notifier = _progress[track.id];
-          if (notifier == null) return;
-          notifier.value = DownloadProgress(done, total);
-        },
-      );
-
-      if (!_active.containsKey(track.id)) {
-        // User cancelled / deleted while we were generating. The file's
-        // already been written; best-effort clean it up.
-        final f = File(result.filePath);
-        if (await f.exists()) await f.delete();
-        return;
-      }
-      _active.remove(track.id);
-      _progress.remove(track.id)?.dispose();
-
-      final palette = paletteForId(track.id);
-      final ready = Track(
-        id: track.id,
-        title: track.title,
-        channel: track.channel,
-        duration: article.estimatedDurationSeconds,
-        size: _formatSize(result.bytesWritten),
-        addedAt: 'Today',
-        color1: palette.c1,
-        color2: palette.c2,
-        filePath: result.filePath,
-        sourceUrl: track.sourceUrl,
-      );
-      onCompleted(ready);
-    } catch (e) {
-      if (!_active.containsKey(track.id)) return;
-      _active.remove(track.id);
-      onFailed(track.id, _shortenError(e));
-    } finally {
-      tts.dispose();
-    }
-  }
 
   /// Re-attach to in-flight work after an app restart. For each
   /// [downloadingTracks], asks the native side what state the work is in
