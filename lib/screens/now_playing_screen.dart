@@ -207,15 +207,13 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               onVerticalDragUpdate: widget.onArtworkVerticalDragUpdate,
               onVerticalDragEnd: widget.onArtworkVerticalDragEnd,
             ),
-            _TitleBlock(
-              track: track,
-              showUndo: _showUndo,
-              undoLabel: _undoLabel,
-              onUndo: _handleUndo,
-            ),
+            _TitleBlock(track: track),
             const SizedBox(height: 4),
             Expanded(
               child: SingleChildScrollView(
+                // Clip.none so the undo pill, anchored just above the waveform,
+                // can paint up into the byline gap without being clipped.
+                clipBehavior: Clip.none,
                 physics: track.status == TrackStatus.failed
                     ? const ClampingScrollPhysics()
                     : const NeverScrollableScrollPhysics(),
@@ -223,6 +221,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   track: track,
                   playing: widget.playing,
                   progress: widget.progress,
+                  showUndo: _showUndo,
+                  undoLabel: _undoLabel,
+                  onUndo: _handleUndo,
                   speed: widget.speed,
                   sleepRemaining: widget.sleepRemaining,
                   onTogglePlay: widget.onTogglePlay,
@@ -515,15 +516,7 @@ class _LyricsView extends StatelessWidget {
 
 class _TitleBlock extends StatelessWidget {
   final Track track;
-  final bool showUndo;
-  final String undoLabel;
-  final VoidCallback onUndo;
-  const _TitleBlock({
-    required this.track,
-    required this.showUndo,
-    required this.undoLabel,
-    required this.onUndo,
-  });
+  const _TitleBlock({required this.track});
 
   @override
   Widget build(BuildContext context) {
@@ -540,33 +533,14 @@ class _TitleBlock extends StatelessWidget {
                 .copyWith(height: 1.15),
           ),
           const SizedBox(height: 6),
-          // Byline row: the channel sits on the left; the transient "back to
-          // where I was" pill floats in the free space on the right. Article
-          // tracks put a long byline in `channel`, so it's clamped to two
-          // lines (and yields room to the pill when it's showing).
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Text(
-                  track.channel,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: AuroraTheme.body(size: 13, weight: FontWeight.w600, color: AuroraTheme.muted),
-                ),
-              ),
-              IgnorePointer(
-                ignoring: !showUndo,
-                child: AnimatedOpacity(
-                  opacity: showUndo ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 250),
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 10),
-                    child: _UndoPill(label: undoLabel, onTap: onUndo),
-                  ),
-                ),
-              ),
-            ],
+          // Article tracks put the byline in `channel`. Allow a couple of
+          // lines but not the whole paragraph — otherwise the body below
+          // gets pushed off-screen.
+          Text(
+            track.channel,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: AuroraTheme.body(size: 13, weight: FontWeight.w600, color: AuroraTheme.muted),
           ),
         ],
       ),
@@ -583,6 +557,9 @@ class _BodyForStatus extends StatelessWidget {
   final VoidCallback onTogglePlay;
   final ValueChanged<double> onSeek;
   final ValueChanged<double> onWaveformSeek;
+  final bool showUndo;
+  final String undoLabel;
+  final VoidCallback onUndo;
   final VoidCallback onCycleSpeed;
   final void Function(Duration?) onPickSleepTimer;
   final ValueListenable<DownloadProgress?>? downloadProgress;
@@ -599,6 +576,9 @@ class _BodyForStatus extends StatelessWidget {
     required this.onTogglePlay,
     required this.onSeek,
     required this.onWaveformSeek,
+    required this.showUndo,
+    required this.undoLabel,
+    required this.onUndo,
     required this.onCycleSpeed,
     required this.onPickSleepTimer,
     required this.downloadProgress,
@@ -633,6 +613,9 @@ class _BodyForStatus extends StatelessWidget {
           onTogglePlay: onTogglePlay,
           onSeek: onSeek,
           onWaveformSeek: onWaveformSeek,
+          showUndo: showUndo,
+          undoLabel: undoLabel,
+          onUndo: onUndo,
           onCycleSpeed: onCycleSpeed,
           onPickSleepTimer: onPickSleepTimer,
         );
@@ -649,6 +632,9 @@ class _ReadyBody extends StatelessWidget {
   final VoidCallback onTogglePlay;
   final ValueChanged<double> onSeek;
   final ValueChanged<double> onWaveformSeek;
+  final bool showUndo;
+  final String undoLabel;
+  final VoidCallback onUndo;
   final VoidCallback onCycleSpeed;
   final void Function(Duration?) onPickSleepTimer;
   const _ReadyBody({
@@ -660,6 +646,9 @@ class _ReadyBody extends StatelessWidget {
     required this.onTogglePlay,
     required this.onSeek,
     required this.onWaveformSeek,
+    required this.showUndo,
+    required this.undoLabel,
+    required this.onUndo,
     required this.onCycleSpeed,
     required this.onPickSleepTimer,
   });
@@ -674,7 +663,28 @@ class _ReadyBody extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(26, 6, 26, 0),
           child: Column(
             children: [
-              WaveformScrubber(bars: bars, progress: progress, onSeek: onWaveformSeek),
+              // The undo pill lives in the waveform's own layer so it paints
+              // on top of the bars. A small negative top floats it just above
+              // the wave, dipping slightly over its top edge; Clip.none on the
+              // parent scroll view lets the part above the bars stay visible.
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  WaveformScrubber(bars: bars, progress: progress, onSeek: onWaveformSeek),
+                  Positioned(
+                    top: -12,
+                    right: 0,
+                    child: IgnorePointer(
+                      ignoring: !showUndo,
+                      child: AnimatedOpacity(
+                        opacity: showUndo ? 1.0 : 0.0,
+                        duration: const Duration(milliseconds: 250),
+                        child: _UndoPill(label: undoLabel, onTap: onUndo),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
