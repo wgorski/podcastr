@@ -64,7 +64,10 @@ class _UndoableWaveformState extends State<UndoableWaveform> {
     _timer?.cancel();
     _timer = Timer(_window, () {
       if (!mounted) return;
-      setState(() => _showUndo = false);
+      setState(() {
+        _showUndo = false;
+        _undoFraction = null;
+      });
     });
   }
 
@@ -97,13 +100,6 @@ class _UndoableWaveformState extends State<UndoableWaveform> {
             child: AnimatedOpacity(
               opacity: _showUndo ? 1.0 : 0.0,
               duration: const Duration(milliseconds: 250),
-              onEnd: () {
-                // After the fade-out completes, drop the anchor so the next
-                // scrub captures a fresh listening spot.
-                if (!_showUndo && _undoFraction != null) {
-                  setState(() => _undoFraction = null);
-                }
-              },
               child: _UndoPill(label: _undoLabel, onTap: _undo),
             ),
           ),
