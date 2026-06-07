@@ -637,6 +637,12 @@ class _ReadyBody extends StatelessWidget {
   final VoidCallback onUndo;
   final VoidCallback onCycleSpeed;
   final void Function(Duration?) onPickSleepTimer;
+
+  /// Transparent strip above the waveform bars that hosts the undo pill so it
+  /// stays tappable while floating above the wave. The ready body is shifted up
+  /// by this amount so the headroom is invisible.
+  static const double _undoHeadroom = 22;
+
   const _ReadyBody({
     required this.track,
     required this.playing,
@@ -657,22 +663,31 @@ class _ReadyBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final bars = waveformBars(track.id, count: 56);
     final elapsed = (progress * track.duration).floor();
-    return Column(
+    // The undo pill floats above the waveform bars. Flutter won't deliver taps
+    // to a child painted outside its parent's box, so the waveform Stack below
+    // carries [_undoHeadroom] of transparent headroom on top that contains the
+    // pill (making it hit-testable), and the whole body is shifted up by the
+    // same amount here so nothing moves on screen.
+    return Transform.translate(
+      offset: const Offset(0, -_undoHeadroom),
+      child: Column(
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(26, 6, 26, 0),
           child: Column(
             children: [
-              // The undo pill lives in the waveform's own layer so it paints
-              // on top of the bars. A small negative top floats it just above
-              // the wave, dipping slightly over its top edge; Clip.none on the
-              // parent scroll view lets the part above the bars stay visible.
+              // Transparent headroom (cancels the Transform shift above) so the
+              // pill sits inside this Stack's hit area while floating above the
+              // bars. Clip.none lets it paint up into the byline gap.
               Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  WaveformScrubber(bars: bars, progress: progress, onSeek: onWaveformSeek),
+                  Padding(
+                    padding: const EdgeInsets.only(top: _undoHeadroom),
+                    child: WaveformScrubber(bars: bars, progress: progress, onSeek: onWaveformSeek),
+                  ),
                   Positioned(
-                    top: -12,
+                    top: 0,
                     right: 0,
                     child: IgnorePointer(
                       ignoring: !showUndo,
@@ -736,6 +751,7 @@ class _ReadyBody extends StatelessWidget {
           ),
         ),
       ],
+      ),
     );
   }
 }
