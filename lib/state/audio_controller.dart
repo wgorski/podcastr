@@ -12,6 +12,11 @@ import 'position_store.dart';
 class AudioController {
   final AudioPlayer _player = AudioPlayer();
   final PositionStore _positions = PositionStore();
+  // In-memory mirror of the persisted resume points (track id → seconds), so
+  // the UI can render a track's progress synchronously even when it isn't the
+  // engine's current track (the now-playing screen is view-only until play is
+  // hit). Kept coherent with `_positions` on every set / remove.
+  Map<String, int> _posCache = {};
   final void Function() _onChanged;
   final void Function(String trackId)? _onCompleted;
 
@@ -55,6 +60,7 @@ class AudioController {
         _player.pause();
         final t = _current;
         if (t != null) {
+          _posCache.remove(t.id);
           _positions.remove(t.id);
           _onCompleted?.call(t.id);
         }
@@ -72,8 +78,34 @@ class AudioController {
     });
   }
 
+  /// Load the persisted resume points into memory. Call once at startup so
+  /// [resumeProgress] / [resumePosition] return real values on the first build.
+  Future<void> primePositions() async {
+    _posCache = await _positions.all();
+    _onChanged();
+  }
+
+  /// Saved progress 0..1 for any track, usable when it is *not* the engine's
+  /// current track. A finished track reads as full (its resume point is dropped
+  /// on completion, mirroring the live "waveform stays filled when done" rule).
+  double resumeProgress(Track t) {
+    if (t.finished) return 1.0;
+    final secs = _posCache[t.id];
+    if (secs == null || t.duration <= 0) return 0.0;
+    return (secs / t.duration).clamp(0.0, 1.0);
+  }
+
+  /// Saved playback position for any track, mirroring [resumeProgress].
+  Duration resumePosition(Track t) {
+    if (t.finished) return Duration(seconds: t.duration);
+    return Duration(seconds: _posCache[t.id] ?? 0);
+  }
+
   /// Drop the saved resume point for a track (used when the track is deleted).
-  Future<void> forget(String id) => _positions.remove(id);
+  Future<void> forget(String id) {
+    _posCache.remove(id);
+    return _positions.remove(id);
+  }
 
   /// Treat the current track as finished if playback is within the final
   /// minute. Called when the user pauses or switches away from a track.
@@ -111,6 +143,7 @@ class AudioController {
     // Don't save the trivial endpoints: 0 means "fresh", end means "done".
     if (pos > const Duration(seconds: 2) && pos < total - const Duration(seconds: 2)) {
       _lastSavedAt = DateTime.now();
+      _posCache[t.id] = pos.inSeconds;
       await _positions.set(t.id, pos.inSeconds);
     }
   }
@@ -175,6 +208,11 @@ class AudioController {
       await _player.setSpeed(_speed);
       // Restore the saved resume point, if any.
       final saved = await _positions.get(t.id);
+      if (saved != null) {
+        _posCache[t.id] = saved;
+      } else {
+        _posCache.remove(t.id);
+      }
       if (saved != null && saved > 0) {
         final total = _player.duration ?? Duration(seconds: t.duration);
         final target = Duration(seconds: saved);

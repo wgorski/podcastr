@@ -135,6 +135,9 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   }
 
   Future<void> _load() async {
+    // Prime saved resume points so the now-playing waveform can show a track's
+    // progress as soon as it's opened, before it's bound into the audio engine.
+    await _audio.primePositions();
     final tracks = await _store.load();
     if (!mounted) return;
     setState(() => _tracks = tracks);
@@ -594,8 +597,15 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                         child: NowPlayingScreen(
                           track: fresh,
                           playing: showLive && _playing,
-                          progress: showLive ? _progress : 0.0,
-                          position: showLive ? _audio.position : Duration.zero,
+                          // Not the engine's current track? Fall back to the
+                          // persisted resume point so the waveform shows where
+                          // the user left off without having to hit play first.
+                          progress: showLive
+                              ? _progress
+                              : (isReady ? _audio.resumeProgress(fresh) : 0.0),
+                          position: showLive
+                              ? _audio.position
+                              : (isReady ? _audio.resumePosition(fresh) : Duration.zero),
                           speed: _speed,
                           sleepRemaining: _sleepRemaining,
                           onTogglePlay: () => _playTapped(fresh),

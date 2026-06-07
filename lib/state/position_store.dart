@@ -20,6 +20,11 @@ class PositionStore {
     }
   }
 
+  /// All saved positions at once. Used to prime an in-memory cache so the UI
+  /// can render a track's resume point synchronously, before it's loaded into
+  /// the audio engine.
+  Future<Map<String, int>> all() => _loadAll();
+
   Future<int?> get(String id) async => (await _loadAll())[id];
 
   Future<void> set(String id, int seconds) async {
