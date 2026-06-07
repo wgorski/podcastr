@@ -279,6 +279,36 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     }
   }
 
+  /// Seek the viewed track. When it's the engine's current track, this is a
+  /// live seek. When it isn't — the now-playing screen is view-only, and
+  /// another track may be playing in the background — we must NOT hijack the
+  /// engine: we only move this track's saved resume point so its waveform
+  /// reflects the drag. Whatever is playing keeps playing; this track will
+  /// resume from the dragged spot the next time it's played.
+  Future<void> _seekTapped(Track t, double fraction) async {
+    if (t.status != TrackStatus.ready) return;
+    if (_current?.id == t.id) {
+      await _audio.seekFraction(fraction);
+      return;
+    }
+    final f = fraction.clamp(0.0, 1.0);
+    // Scrubbing a finished track back into its body revives it, so the
+    // indicator can leave the fully-played "100%" state.
+    if (t.finished && f < 0.99) {
+      setState(() {
+        _tracks = [
+          for (final x in _tracks)
+            x.id == t.id ? x.copyWith(finished: false) : x,
+        ];
+        if (_viewedTrack?.id == t.id) {
+          _viewedTrack = _viewedTrack!.copyWith(finished: false);
+        }
+      });
+      await _persist();
+    }
+    await _audio.setResume(t, f);
+  }
+
   Future<void> _cycleSpeed() async {
     const opts = [1.0, 1.25, 1.5, 1.75, 2.0];
     final i = opts.indexOf(_speed);
@@ -610,7 +640,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                           sleepRemaining: _sleepRemaining,
                           onTogglePlay: () => _playTapped(fresh),
                           onClose: dismiss,
-                          onSeek: showLive ? _audio.seekFraction : (_) {},
+                          onSeek: isReady ? (f) => _seekTapped(fresh, f) : (_) {},
                           onCycleSpeed: _cycleSpeed,
                           onPickSleepTimer: _setSleepTimer,
                           downloadProgress: _downloads.progressFor(fresh.id),

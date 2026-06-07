@@ -107,6 +107,20 @@ class AudioController {
     return _positions.remove(id);
   }
 
+  /// Move the saved resume point for a track that is *not* the engine's
+  /// current one — e.g. the user scrubbed the waveform of a track they're only
+  /// viewing while something else plays. Updates the in-memory mirror and
+  /// persists so [resumeProgress] / [resumePosition] reflect the drag
+  /// immediately, without disturbing live playback. Playing the track later
+  /// resumes from here (see [load], which restores the saved point).
+  Future<void> setResume(Track t, double fraction) async {
+    if (t.duration <= 0) return;
+    final secs = (fraction.clamp(0.0, 1.0) * t.duration).round();
+    _posCache[t.id] = secs;
+    _onChanged();
+    await _positions.set(t.id, secs);
+  }
+
   /// Treat the current track as finished if playback is within the final
   /// minute. Called when the user pauses or switches away from a track.
   /// Safe to call repeatedly — the host marks tracks as finished idempotently.
