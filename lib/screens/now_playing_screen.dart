@@ -164,6 +164,25 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     final cues = showLyrics ? _subs!.cues : const <SubtitleCue>[];
     final activeIdx = showLyrics ? _subs!.activeIndex(widget.position) : null;
     final anchorIdx = showLyrics ? _subs!.anchorIndex(widget.position) : 0;
+    final body = _BodyForStatus(
+      track: track,
+      playing: widget.playing,
+      progress: widget.progress,
+      showUndo: _showUndo,
+      undoLabel: _undoLabel,
+      onUndo: _handleUndo,
+      speed: widget.speed,
+      sleepRemaining: widget.sleepRemaining,
+      onTogglePlay: widget.onTogglePlay,
+      onSeek: widget.onSeek,
+      onWaveformSeek: _handleWaveformSeek,
+      onCycleSpeed: widget.onCycleSpeed,
+      onPickSleepTimer: widget.onPickSleepTimer,
+      downloadProgress: widget.downloadProgress,
+      onCancelDownload: widget.onCancelDownload,
+      onRetryDownload: widget.onRetryDownload,
+      onArchive: widget.onArchive,
+    );
     return Stack(
       children: [
         // Glow from artwork color
@@ -210,33 +229,22 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             _TitleBlock(track: track),
             const SizedBox(height: 4),
             Expanded(
-              child: SingleChildScrollView(
-                // Clip.none so the undo pill, anchored just above the waveform,
-                // can paint up into the byline gap without being clipped.
-                clipBehavior: Clip.none,
-                physics: track.status == TrackStatus.failed
-                    ? const ClampingScrollPhysics()
-                    : const NeverScrollableScrollPhysics(),
-                child: _BodyForStatus(
-                  track: track,
-                  playing: widget.playing,
-                  progress: widget.progress,
-                  showUndo: _showUndo,
-                  undoLabel: _undoLabel,
-                  onUndo: _handleUndo,
-                  speed: widget.speed,
-                  sleepRemaining: widget.sleepRemaining,
-                  onTogglePlay: widget.onTogglePlay,
-                  onSeek: widget.onSeek,
-                  onWaveformSeek: _handleWaveformSeek,
-                  onCycleSpeed: widget.onCycleSpeed,
-                  onPickSleepTimer: widget.onPickSleepTimer,
-                  downloadProgress: widget.downloadProgress,
-                  onCancelDownload: widget.onCancelDownload,
-                  onRetryDownload: widget.onRetryDownload,
-                  onArchive: widget.onArchive,
-                ),
-              ),
+              // Only the failed state needs to scroll (long error text). The
+              // ready / downloading / queued bodies are compact and must NOT
+              // live in a scroll viewport: a scrollable clips *hit-testing* to
+              // its viewport, which silently swallowed taps on the undo pill
+              // where it floats up above the waveform into the byline gap —
+              // only the few pixels dipping below the viewport edge stayed
+              // tappable. Rendering the body directly keeps the whole pill (and
+              // its top tap-slop) hittable; the pill's own headroom still keeps
+              // it from being clipped by the waveform Stack.
+              child: track.status == TrackStatus.failed
+                  ? SingleChildScrollView(
+                      clipBehavior: Clip.none,
+                      physics: const ClampingScrollPhysics(),
+                      child: body,
+                    )
+                  : body,
             ),
           ],
         ),
@@ -640,8 +648,11 @@ class _ReadyBody extends StatelessWidget {
 
   /// Transparent strip above the waveform bars that hosts the undo pill so it
   /// stays tappable while floating above the wave. The ready body is shifted up
-  /// by this amount so the headroom is invisible.
-  static const double _undoHeadroom = 22;
+  /// by this amount so the headroom is invisible. It includes
+  /// [_UndoPill.topHitSlop] of extra room on top so the pill's enlarged tap
+  /// target (transparent slop above the visible pill) still falls inside the
+  /// hit-testable Stack while the visible pill keeps its tuned resting position.
+  static const double _undoHeadroom = 22 + _UndoPill.topHitSlop;
 
   const _ReadyBody({
     required this.track,
@@ -1074,41 +1085,54 @@ class _UndoPill extends StatelessWidget {
   final VoidCallback onTap;
   const _UndoPill({required this.label, required this.onTap});
 
+  /// Transparent tap-target slop above the visible pill. The pill is small and
+  /// floats over the waveform's top edge, so taps that land just above it should
+  /// still count. [_ReadyBody._undoHeadroom] reserves the same amount so the
+  /// visible pill doesn't shift down.
+  static const double topHitSlop = 16;
+
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(9, 6, 12, 6),
-          decoration: BoxDecoration(
-            color: AuroraTheme.accentSoft,
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.only(top: topHitSlop),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
             borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: AuroraTheme.border2, width: 1),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.35),
-                blurRadius: 18,
-                offset: const Offset(0, 6),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(9, 6, 12, 6),
+              decoration: BoxDecoration(
+                color: AuroraTheme.accentSoft,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: AuroraTheme.border2, width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    blurRadius: 18,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
               ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.undo_rounded, size: 15, color: AuroraTheme.accent),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: AuroraTheme.mono(
-                  size: 12,
-                  weight: FontWeight.w700,
-                  color: AuroraTheme.accent,
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.undo_rounded, size: 15, color: AuroraTheme.accent),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: AuroraTheme.mono(
+                      size: 12,
+                      weight: FontWeight.w700,
+                      color: AuroraTheme.accent,
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
