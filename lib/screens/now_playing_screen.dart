@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
@@ -7,7 +9,7 @@ import '../services/youtube_downloader.dart';
 import '../state/subtitles.dart';
 import '../theme/aurora_theme.dart';
 import '../widgets/thumbnail.dart';
-import '../widgets/undoable_waveform.dart';
+import '../widgets/waveform_scrubber.dart';
 import '../widgets/back15_icon.dart';
 
 class NowPlayingScreen extends StatefulWidget {
@@ -67,11 +69,59 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   // long-press sheet.
   bool _geminiAvailable = false;
 
+  // Transient "back to where I was" affordance. After a *waveform* seek we show
+  // a pill in the byline row for 5 seconds; tapping it returns playback to the
+  // spot the user was at before the (possibly accidental) scrub. The skip
+  // buttons call `onSeek` directly and never arm it. Repeated scrubs within the
+  // window keep the original anchor and only refresh the timer.
+  static const _undoWindow = Duration(seconds: 5);
+  double? _undoFraction;
+  String _undoLabel = '';
+  bool _showUndo = false;
+  Timer? _undoTimer;
+
   @override
   void initState() {
     super.initState();
     _maybeLoadSubtitles();
     _resolveGeminiAvailability();
+  }
+
+  @override
+  void dispose() {
+    _undoTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Wraps a waveform seek: captures the pre-scrub spot once, performs the
+  /// seek, then shows the undo pill and (re)starts the 5 s window.
+  void _handleWaveformSeek(double p) {
+    if (_undoFraction == null) {
+      final frac = widget.progress.clamp(0.0, 1.0).toDouble();
+      _undoFraction = frac;
+      _undoLabel = formatDuration((frac * widget.track.duration).floor());
+    }
+    widget.onSeek(p);
+    setState(() => _showUndo = true);
+    _undoTimer?.cancel();
+    _undoTimer = Timer(_undoWindow, () {
+      if (!mounted) return;
+      setState(() {
+        _showUndo = false;
+        _undoFraction = null;
+      });
+    });
+  }
+
+  void _handleUndo() {
+    final target = _undoFraction;
+    if (target == null) return;
+    _undoTimer?.cancel();
+    widget.onSeek(target);
+    setState(() {
+      _showUndo = false;
+      _undoFraction = null;
+    });
   }
 
   Future<void> _resolveGeminiAvailability() async {
@@ -157,7 +207,12 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               onVerticalDragUpdate: widget.onArtworkVerticalDragUpdate,
               onVerticalDragEnd: widget.onArtworkVerticalDragEnd,
             ),
-            _TitleBlock(track: track),
+            _TitleBlock(
+              track: track,
+              showUndo: _showUndo,
+              undoLabel: _undoLabel,
+              onUndo: _handleUndo,
+            ),
             const SizedBox(height: 4),
             Expanded(
               child: SingleChildScrollView(
@@ -172,6 +227,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   sleepRemaining: widget.sleepRemaining,
                   onTogglePlay: widget.onTogglePlay,
                   onSeek: widget.onSeek,
+                  onWaveformSeek: _handleWaveformSeek,
                   onCycleSpeed: widget.onCycleSpeed,
                   onPickSleepTimer: widget.onPickSleepTimer,
                   downloadProgress: widget.downloadProgress,
@@ -459,7 +515,15 @@ class _LyricsView extends StatelessWidget {
 
 class _TitleBlock extends StatelessWidget {
   final Track track;
-  const _TitleBlock({required this.track});
+  final bool showUndo;
+  final String undoLabel;
+  final VoidCallback onUndo;
+  const _TitleBlock({
+    required this.track,
+    required this.showUndo,
+    required this.undoLabel,
+    required this.onUndo,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -476,14 +540,33 @@ class _TitleBlock extends StatelessWidget {
                 .copyWith(height: 1.15),
           ),
           const SizedBox(height: 6),
-          // Article tracks put the byline in `channel`. Allow a couple of
-          // lines but not the whole paragraph — otherwise the body below
-          // gets pushed off-screen.
-          Text(
-            track.channel,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: AuroraTheme.body(size: 13, weight: FontWeight.w600, color: AuroraTheme.muted),
+          // Byline row: the channel sits on the left; the transient "back to
+          // where I was" pill floats in the free space on the right. Article
+          // tracks put a long byline in `channel`, so it's clamped to two
+          // lines (and yields room to the pill when it's showing).
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Text(
+                  track.channel,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AuroraTheme.body(size: 13, weight: FontWeight.w600, color: AuroraTheme.muted),
+                ),
+              ),
+              IgnorePointer(
+                ignoring: !showUndo,
+                child: AnimatedOpacity(
+                  opacity: showUndo ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 250),
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 10),
+                    child: _UndoPill(label: undoLabel, onTap: onUndo),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -499,6 +582,7 @@ class _BodyForStatus extends StatelessWidget {
   final Duration? sleepRemaining;
   final VoidCallback onTogglePlay;
   final ValueChanged<double> onSeek;
+  final ValueChanged<double> onWaveformSeek;
   final VoidCallback onCycleSpeed;
   final void Function(Duration?) onPickSleepTimer;
   final ValueListenable<DownloadProgress?>? downloadProgress;
@@ -514,6 +598,7 @@ class _BodyForStatus extends StatelessWidget {
     required this.sleepRemaining,
     required this.onTogglePlay,
     required this.onSeek,
+    required this.onWaveformSeek,
     required this.onCycleSpeed,
     required this.onPickSleepTimer,
     required this.downloadProgress,
@@ -547,6 +632,7 @@ class _BodyForStatus extends StatelessWidget {
           sleepRemaining: sleepRemaining,
           onTogglePlay: onTogglePlay,
           onSeek: onSeek,
+          onWaveformSeek: onWaveformSeek,
           onCycleSpeed: onCycleSpeed,
           onPickSleepTimer: onPickSleepTimer,
         );
@@ -562,6 +648,7 @@ class _ReadyBody extends StatelessWidget {
   final Duration? sleepRemaining;
   final VoidCallback onTogglePlay;
   final ValueChanged<double> onSeek;
+  final ValueChanged<double> onWaveformSeek;
   final VoidCallback onCycleSpeed;
   final void Function(Duration?) onPickSleepTimer;
   const _ReadyBody({
@@ -572,6 +659,7 @@ class _ReadyBody extends StatelessWidget {
     required this.sleepRemaining,
     required this.onTogglePlay,
     required this.onSeek,
+    required this.onWaveformSeek,
     required this.onCycleSpeed,
     required this.onPickSleepTimer,
   });
@@ -586,12 +674,7 @@ class _ReadyBody extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(26, 6, 26, 0),
           child: Column(
             children: [
-              UndoableWaveform(
-                bars: bars,
-                progress: progress,
-                duration: track.duration,
-                onSeek: onSeek,
-              ),
+              WaveformScrubber(bars: bars, progress: progress, onSeek: onWaveformSeek),
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -951,6 +1034,55 @@ class _PlayButton extends StatelessWidget {
             playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
             size: 32,
             color: AuroraTheme.onAccent,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Transient "back to where I was" pill shown in the byline row after a
+/// waveform seek. Tapping it returns playback to the captured spot.
+class _UndoPill extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _UndoPill({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(9, 6, 12, 6),
+          decoration: BoxDecoration(
+            color: AuroraTheme.accentSoft,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: AuroraTheme.border2, width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.35),
+                blurRadius: 18,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.undo_rounded, size: 15, color: AuroraTheme.accent),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: AuroraTheme.mono(
+                  size: 12,
+                  weight: FontWeight.w700,
+                  color: AuroraTheme.accent,
+                ),
+              ),
+            ],
           ),
         ),
       ),
