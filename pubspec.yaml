@@ -1,7 +1,7 @@
 name: podcastr
 description: Podcastr — Aurora-themed audio library (Flutter port of the design prototype).
 publish_to: "none"
-version: 0.14.0
+version: 0.15.0
 
 environment:
   sdk: ">=3.6.0 <4.0.0"
@@ -13,8 +13,6 @@ dependencies:
   google_fonts: ^6.2.1
   # Persist the library across restarts
   shared_preferences: ^2.5.2
-  # Receive YouTube URLs shared from other apps
-  receive_sharing_intent: ^1.8.1
   # Filesystem paths for downloaded audio
   path_provider: ^2.1.5
   # Runtime POST_NOTIFICATIONS permission on Android 13+ (so the WorkManager

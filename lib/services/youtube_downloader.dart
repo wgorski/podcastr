@@ -6,6 +6,19 @@ import 'package:path_provider/path_provider.dart';
 
 const _channel = MethodChannel('com.wgorski.podcastr/youtube');
 const _events = EventChannel('com.wgorski.podcastr/downloads');
+const _shareEvents = EventChannel('com.wgorski.podcastr/shareIntent');
+
+/// Raw shared text / URLs captured natively from ACTION_SEND / ACTION_VIEW
+/// intents (see [MainActivity.handleShareIntent]). The native side buffers a
+/// cold-start intent until this stream is first listened to, so there is no
+/// drop race regardless of whether the app was cold- or warm-started. The
+/// YouTube-URL matching lives in the caller (`_PodcastrHome`).
+Stream<String> get sharedTextStream => _sharedTextStream;
+
+final Stream<String> _sharedTextStream = _shareEvents
+    .receiveBroadcastStream()
+    .where((e) => e != null)
+    .cast<String>();
 
 /// What the Kotlin NewPipe Extractor bridge returns for a given YouTube URL.
 /// Used only by the download sheet to render the resolve → ready preview.

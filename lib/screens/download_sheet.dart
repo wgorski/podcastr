@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/track.dart';
 import '../services/youtube_downloader.dart';
@@ -56,7 +57,7 @@ class _DownloadSheetState extends State<DownloadSheet> {
       if (!mounted) return;
       setState(() {
         _phase = _Phase.error;
-        _errorMessage = e.toString();
+        _errorMessage = _friendlyResolveError(e);
       });
     }
   }
@@ -266,6 +267,54 @@ class _Sheet extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Translate a raw resolve failure into a short, human-readable line.
+///
+/// The native bridge wraps every NewPipe / extractor throwable as a
+/// `PlatformException("EXTRACT", <message>)`, so the raw text is
+/// developer-facing ("URL not accepted: https://…", parser internals). The
+/// sheet title already says "Couldn't read this link" — this fills in the
+/// *why* in plain language. Falls back to a generic retry prompt for
+/// anything we don't recognise.
+String _friendlyResolveError(Object e) {
+  final raw = (e is PlatformException ? e.message : null) ?? e.toString();
+  final m = raw.toLowerCase();
+
+  if (m.contains('url not accepted') ||
+      m.contains('not a valid') ||
+      m.contains('unsupported url')) {
+    return "That doesn't look like a valid YouTube video link.";
+  }
+  if (m.contains('unable to resolve host') ||
+      m.contains('unknownhost') ||
+      m.contains('failed to connect') ||
+      m.contains('timeout') ||
+      m.contains('timed out') ||
+      m.contains('network is unreachable')) {
+    return 'No internet connection. Check your network and try again.';
+  }
+  if ((m.contains('age') && m.contains('restrict')) ||
+      m.contains('login') ||
+      m.contains('sign in') ||
+      m.contains('private') ||
+      m.contains('drm') ||
+      m.contains('protected')) {
+    return "This video can't be downloaded — it may be private, age-restricted, or DRM-protected.";
+  }
+  if (m.contains('country') || m.contains('region') || m.contains('geo')) {
+    return "This video isn't available in your region.";
+  }
+  if (m.contains('not available') ||
+      m.contains('unavailable') ||
+      m.contains('removed') ||
+      m.contains('terminated') ||
+      m.contains('deleted')) {
+    return 'This video is no longer available.';
+  }
+  // Parser / "page needs to be reloaded" style failures — usually transient
+  // or a sign the extractor needs a bump. Either way, suggest a retry.
+  return 'Something went wrong reading this video. Tap Retry to try again.';
 }
 
 class _MetadataCard extends StatelessWidget {

@@ -3,6 +3,7 @@ package com.wgorski.podcastr
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.util.Log
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -28,9 +29,18 @@ import org.schabi.newpipe.extractor.NewPipe
 class MainActivity : AudioServiceActivity() {
     private val methodChannelName = "com.wgorski.podcastr/youtube"
     private val eventChannelName = "com.wgorski.podcastr/downloads"
+    // Share-intent bridge. We own ACTION_SEND / ACTION_VIEW capture natively
+    // rather than delegating to receive_sharing_intent, whose warm-delivery
+    // path (onNewIntent → event sink) silently drops the URL if the Dart
+    // listener isn't attached at the instant the intent arrives. Here the
+    // captured URL is buffered in [pendingSharedText] and flushed the moment
+    // Dart subscribes — no drop race, cold or warm.
+    private val shareEventChannelName = "com.wgorski.podcastr/shareIntent"
     private val ioScope = CoroutineScope(Dispatchers.Default)
     private val observerJobs = mutableMapOf<String, Job>()
     private var downloadEventsSink: EventChannel.EventSink? = null
+    private var shareEventsSink: EventChannel.EventSink? = null
+    private var pendingSharedText: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -86,6 +96,57 @@ class MainActivity : AudioServiceActivity() {
                 downloadEventsSink = null
             }
         })
+
+        EventChannel(messenger, shareEventChannelName).setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+                shareEventsSink = events
+                // Flush whatever the launch (cold-start) intent buffered before
+                // Dart was ready to listen.
+                pendingSharedText?.let {
+                    Log.i(TAG_LOG, "Dart attached; flushing buffered shared text")
+                    events.success(it)
+                    pendingSharedText = null
+                }
+            }
+            override fun onCancel(arguments: Any?) {
+                shareEventsSink = null
+            }
+        })
+
+        // Cold start: the activity was launched by a SEND / VIEW intent.
+        handleShareIntent(intent, initial = true)
+    }
+
+    // Warm start: app already running; singleTask routes the share here.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleShareIntent(intent, initial = false)
+    }
+
+    /// Extract the shared URL/text from a SEND (EXTRA_TEXT) or VIEW (data URI)
+    /// intent and deliver it to Dart, buffering if no listener is attached yet.
+    /// Non-share intents (MAIN/LAUNCHER) are ignored. The YouTube-URL matching
+    /// itself stays in Dart — here we forward the raw candidate string.
+    private fun handleShareIntent(intent: Intent?, initial: Boolean) {
+        val text = when (intent?.action) {
+            Intent.ACTION_SEND ->
+                if (intent.type == "text/plain") intent.getStringExtra(Intent.EXTRA_TEXT) else null
+            Intent.ACTION_VIEW -> intent.dataString
+            else -> null
+        }?.trim()
+        if (text.isNullOrEmpty()) {
+            Log.i(TAG_LOG, "share intent ignored (initial=$initial action=${intent?.action} type=${intent?.type})")
+            return
+        }
+        Log.i(TAG_LOG, "share intent captured (initial=$initial action=${intent?.action}): ${text.take(120)}")
+        val sink = shareEventsSink
+        if (sink != null) {
+            sink.success(text)
+        } else {
+            Log.i(TAG_LOG, "no Dart listener yet; buffering shared text")
+            pendingSharedText = text
+        }
     }
 
     override fun onDestroy() {
@@ -276,6 +337,7 @@ class MainActivity : AudioServiceActivity() {
     }
 
     companion object {
+        const val TAG_LOG = "PodcastrShare"
         const val TAG_PREFIX = "podcastr.download:"
         // Standalone Google Gemini app (formerly Bard).
         const val GEMINI_PACKAGE = "com.google.android.apps.bard"

@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio_background/just_audio_background.dart';
-import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 import 'package:permission_handler/permission_handler.dart';
 
@@ -13,6 +12,7 @@ import 'screens/library_screen.dart';
 import 'screens/lock_screen.dart';
 import 'screens/now_playing_screen.dart';
 import 'screens/search_screen.dart';
+import 'services/youtube_downloader.dart';
 import 'state/audio_controller.dart';
 import 'state/download_manager.dart';
 import 'state/library_store.dart';
@@ -106,7 +106,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   Track? _viewedTrack;
 
   String? _pendingDownloadUrl; // YouTube URL captured from a SEND / VIEW intent
-  StreamSubscription<List<SharedMediaFile>>? _intentSub;
+  StreamSubscription<String>? _intentSub;
 
   // Sleep timer: ticks down regardless of pause state; pauses playback at 0.
   Duration? _sleepRemaining;
@@ -174,17 +174,18 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   }
 
   void _wireShareIntent() {
-    // Cold start: app was launched from a share/view intent.
-    ReceiveSharingIntent.instance.getInitialMedia().then(_handleSharedMedia);
-    // While running: another share comes in.
-    _intentSub = ReceiveSharingIntent.instance.getMediaStream().listen(_handleSharedMedia);
+    // Single deterministic source for both cold and warm starts: the native
+    // side (MainActivity) captures the SEND / VIEW intent and buffers it until
+    // this listener attaches, so nothing is dropped. (Previously this used
+    // receive_sharing_intent, whose warm-delivery path could silently drop the
+    // URL if the listener wasn't attached at the instant the intent arrived.)
+    _intentSub = sharedTextStream.listen(_handleSharedText);
   }
 
-  void _handleSharedMedia(List<SharedMediaFile> items) {
-    final url = _extractUrl(items);
+  void _handleSharedText(String shared) {
+    final url = _extractUrl(shared);
     if (url == null) return;
     _dispatchSharedUrl(url);
-    ReceiveSharingIntent.instance.reset();
   }
 
   /// Route a captured URL to the download sheet. Only YouTube links are
@@ -209,16 +210,15 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     caseSensitive: false,
   );
 
-  String? _extractUrl(List<SharedMediaFile> items) {
-    for (final m in items) {
-      // Most share intents land the URL (sometimes with surrounding text)
-      // in `.path` — match any http(s) URL inside the payload.
-      final candidate = m.path;
-      final yt = _youtubeUrlRegex.firstMatch(candidate);
-      if (yt != null) return yt.group(0);
-      final any = _anyUrlRegex.firstMatch(candidate);
-      if (any != null) return any.group(0);
-    }
+  String? _extractUrl(String shared) {
+    // The shared payload may be a bare URL or a URL wrapped in surrounding
+    // text ("Check out this video https://youtu.be/…"). Prefer a YouTube
+    // match; fall back to any http(s) URL so non-YouTube links still get the
+    // "only YouTube supported" snackbar rather than vanishing silently.
+    final yt = _youtubeUrlRegex.firstMatch(shared);
+    if (yt != null) return yt.group(0);
+    final any = _anyUrlRegex.firstMatch(shared);
+    if (any != null) return any.group(0);
     return null;
   }
 
