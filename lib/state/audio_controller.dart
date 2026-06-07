@@ -166,6 +166,13 @@ class AudioController {
   bool get playing => _player.playing;
   double get speed => _speed;
 
+  /// True once the current track's source is fully loaded *and* seeked to its
+  /// resume point. False during [load]'s setup window — where `_player.position`
+  /// transiently reads 0 after `setAudioSource` but before the resume seek. The
+  /// UI uses this to keep showing the resume point (instead of a flickering 0:00)
+  /// until live playback position is trustworthy.
+  bool get ready => _ready;
+
   /// Fraction 0..1 — based on actual loaded duration when available, otherwise
   /// the metadata duration from the Track. A finished track stays at 1.0 until
   /// the user hits play again, at which point [play] seeks back to zero.

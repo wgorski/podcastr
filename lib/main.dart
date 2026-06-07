@@ -613,8 +613,12 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                   // (the one playing in the background). Only mirror live
                   // playback state when the viewed track *is* the engine's
                   // current — otherwise show an idle, ready-to-start screen.
+                  // Also require the engine to be `ready`: during a load the
+                  // position transiently reads 0:00 between setAudioSource and
+                  // the resume seek, so until then we keep showing the resume
+                  // point rather than letting the waveform flicker to the start.
                   final isCurrent = _current?.id == fresh.id;
-                  final showLive = isReady && isCurrent;
+                  final showLive = isReady && isCurrent && _audio.ready;
                   return PopScope(
                     canPop: false,
                     onPopInvokedWithResult: (didPop, _) {
