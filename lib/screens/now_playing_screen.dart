@@ -7,7 +7,7 @@ import '../services/youtube_downloader.dart';
 import '../state/subtitles.dart';
 import '../theme/aurora_theme.dart';
 import '../widgets/thumbnail.dart';
-import '../widgets/waveform_scrubber.dart';
+import '../widgets/undoable_waveform.dart';
 import '../widgets/back15_icon.dart';
 
 class NowPlayingScreen extends StatefulWidget {
@@ -586,7 +586,12 @@ class _ReadyBody extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(26, 6, 26, 0),
           child: Column(
             children: [
-              WaveformScrubber(bars: bars, progress: progress, onSeek: onSeek),
+              UndoableWaveform(
+                bars: bars,
+                progress: progress,
+                duration: track.duration,
+                onSeek: onSeek,
+              ),
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
