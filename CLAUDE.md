@@ -148,9 +148,22 @@ The repo's `setup-env.sh` exports `GRADLE_USER_HOME` to a project-local
 
 ## When in doubt
 
-- Tests don't exist. The verification model is: `flutter analyze` clean,
-  `flutter build apk --debug` succeeds, install via `adb install -r`,
-  visual check via `adb exec-out screencap`.
+- **Tests exist under `test/`** (unit + widget) and are the FASTEST, most
+  reliable verification — prefer them over driving the emulator. For any
+  logic that depends on a `Track`'s state (e.g. which action a context menu
+  shows for `downloading` vs `ready`), write a widget test: construct the
+  exact `Track` state directly and pump the screen. This is deterministic and
+  runs in ~1s, versus driving the emulator which is slow and *races transient
+  states* like an in-flight download (you'll miss the window). Stub native
+  `MethodChannel`s (e.g. `com.wgorski.podcastr/youtube` →
+  `isGeminiInstalled`) with `setMockMethodCallHandler`. Note: a downloading
+  card animates an indeterminate progress indicator forever, so
+  `pumpAndSettle()` hangs — pump fixed durations instead. See
+  `test/screens/library_screen_test.dart` for the pattern.
+- The full verification model is: `flutter analyze` clean → `flutter test`
+  green → `flutter build apk --debug` succeeds → emulator smoke-test only for
+  what tests can't cover (native plugins: the download worker, `just_audio`
+  playback, share intents) via `adb install -r` + `adb exec-out screencap`.
 - The user has the emulator named `pixel_test` (Pixel 6, API 36 ARM64
   Google Play image) already created under `.android-avd/`. Reuse it.
 

@@ -207,6 +207,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               track: track,
               onClose: widget.onClose,
               onArchive: () => _confirmArchive(context),
+              onCancelDownload: widget.onCancelDownload ?? () {},
               onShare: () => Share.share(track.shareUrl, subject: track.title),
               geminiAvailable: _geminiAvailable,
               onSummarizeGemini: () => Gemini.summarize(track.shareUrl),
@@ -266,6 +267,7 @@ class _Header extends StatelessWidget {
   final Track track;
   final VoidCallback onClose;
   final VoidCallback onArchive;
+  final VoidCallback onCancelDownload;
   final VoidCallback onShare;
   final bool geminiAvailable;
   final VoidCallback onSummarizeGemini;
@@ -277,6 +279,7 @@ class _Header extends StatelessWidget {
     required this.track,
     required this.onClose,
     required this.onArchive,
+    required this.onCancelDownload,
     required this.onShare,
     required this.geminiAvailable,
     required this.onSummarizeGemini,
@@ -347,7 +350,9 @@ class _Header extends StatelessWidget {
             ),
           ),
         _MoreMenu(
+          status: track.status,
           onArchive: onArchive,
+          onCancelDownload: onCancelDownload,
           onShare: onShare,
           geminiAvailable: geminiAvailable,
           onSummarizeGemini: onSummarizeGemini,
@@ -1291,12 +1296,16 @@ class _SleepTimerSheet extends StatelessWidget {
 }
 
 class _MoreMenu extends StatelessWidget {
+  final TrackStatus status;
   final VoidCallback onArchive;
+  final VoidCallback onCancelDownload;
   final VoidCallback onShare;
   final bool geminiAvailable;
   final VoidCallback onSummarizeGemini;
   const _MoreMenu({
+    required this.status,
     required this.onArchive,
+    required this.onCancelDownload,
     required this.onShare,
     required this.geminiAvailable,
     required this.onSummarizeGemini,
@@ -1316,6 +1325,7 @@ class _MoreMenu extends StatelessWidget {
         if (v == 'share') onShare();
         if (v == 'gemini') onSummarizeGemini();
         if (v == 'archive') onArchive();
+        if (v == 'cancel') onCancelDownload();
       },
       itemBuilder: (ctx) => [
         PopupMenuItem(
@@ -1341,17 +1351,36 @@ class _MoreMenu extends StatelessWidget {
               ],
             ),
           ),
-        PopupMenuItem(
-          value: 'archive',
-          child: Row(
-            children: [
-              const Icon(Icons.archive_outlined, size: 18, color: AuroraTheme.text),
-              const SizedBox(width: 10),
-              Text('Archive',
-                  style: AuroraTheme.body(size: 14, weight: FontWeight.w600)),
-            ],
+        // Archive only makes sense once the audio exists. While a download is
+        // in flight (or queued), the menu instead offers an outright cancel
+        // that removes the entry completely — there's no audio to archive yet.
+        if (status == TrackStatus.ready)
+          PopupMenuItem(
+            value: 'archive',
+            child: Row(
+              children: [
+                const Icon(Icons.archive_outlined, size: 18, color: AuroraTheme.text),
+                const SizedBox(width: 10),
+                Text('Archive',
+                    style: AuroraTheme.body(size: 14, weight: FontWeight.w600)),
+              ],
+            ),
           ),
-        ),
+        if (status == TrackStatus.downloading || status == TrackStatus.queued)
+          PopupMenuItem(
+            value: 'cancel',
+            child: Row(
+              children: [
+                const Icon(Icons.cancel_outlined, size: 18, color: Color(0xFFFF6E80)),
+                const SizedBox(width: 10),
+                Text('Cancel download',
+                    style: AuroraTheme.body(
+                        size: 14,
+                        weight: FontWeight.w600,
+                        color: const Color(0xFFFF6E80))),
+              ],
+            ),
+          ),
       ],
     );
   }

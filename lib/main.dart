@@ -99,6 +99,9 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
 
   List<Track> _tracks = const [];
   _Screen _screen = _Screen.library;
+  // Drives the library list so we can jump it back to the top — e.g. after an
+  // unarchive prepends a track, so the freshly restored row is in view.
+  final ScrollController _libraryScroll = ScrollController();
   double _speed = 1.0;
   // The track currently rendered on the now-playing screen. Distinct from
   // [_audio.current] because the player screen also surfaces downloading /
@@ -231,6 +234,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     _intentSub?.cancel();
     _downloads.dispose();
     _audio.dispose();
+    _libraryScroll.dispose();
     super.dispose();
   }
 
@@ -407,13 +411,22 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     // built before start() returns subscribes to a live progress notifier.
     final f = _downloads.start(restored);
     setState(() {
+      // Move the restored track to the top of the library, matching where a
+      // fresh download lands, so its re-download progress is the first thing
+      // the user sees rather than buried at its old position.
       _tracks = [
-        for (final x in _tracks) x.id == t.id ? restored : x,
+        restored,
+        for (final x in _tracks) if (x.id != t.id) x,
       ];
       if (_viewedTrack?.id == t.id) _viewedTrack = restored;
       // Surface the re-download in the library so the user sees its progress
       // rather than staying on the archive view it just left.
       if (_screen == _Screen.archive) _screen = _Screen.library;
+    });
+    // The restored row is now at the top; scroll the library up so it's in view
+    // (after this frame, once the prepended list has been laid out).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_libraryScroll.hasClients) _libraryScroll.jumpTo(0);
     });
     await _persist();
     await f;
@@ -545,8 +558,21 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     await _persist();
   }
 
+  /// Cancel an in-progress (downloading or queued) track and remove it
+  /// entirely: abandon the native work, then purge the row and any partial
+  /// files. Unlike a genuine download *failure* — which leaves a retryable
+  /// "failed" row — cancelling means the user wants the track gone, so we use
+  /// [DownloadManager.abort] (no "failed" event) and [_purgeTrack].
   Future<void> _cancelDownload(String trackId) async {
-    await _downloads.cancel(trackId);
+    final idx = _tracks.indexWhere((x) => x.id == trackId);
+    final t = idx >= 0 ? _tracks[idx] : null;
+    // If the cancelled track is the one on screen, fall back to the library so
+    // we don't sit on a now-playing view for a track that no longer exists.
+    if (_screen == _Screen.player && _viewedTrack?.id == trackId) {
+      setState(() => _screen = _Screen.library);
+    }
+    await _downloads.abort(trackId);
+    if (t != null) await _purgeTrack(t);
   }
 
   Future<void> _retryDownload(Track failed) async {
@@ -588,6 +614,8 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
                 onOpenTrack: _openTrack,
                 onPlay: _playTapped,
                 onArchive: _archiveTrack,
+                onCancelDownload: (t) => _cancelDownload(t.id),
+                scrollController: _libraryScroll,
                 onArchiveFinished: _archiveFinished,
                 onSearch: () => setState(() => _screen = _Screen.search),
                 onOpenArchive: () => setState(() => _screen = _Screen.archive),

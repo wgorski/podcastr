@@ -16,9 +16,13 @@ class LibraryScreen extends StatefulWidget {
   final void Function(Track) onOpenTrack;
   final void Function(Track) onPlay;
   final void Function(Track) onArchive;
+  final void Function(Track) onCancelDownload;
   final Future<void> Function() onArchiveFinished;
   final VoidCallback onSearch;
   final VoidCallback onOpenArchive;
+  /// Drives the track list's scroll position (e.g. jump to top after an
+  /// unarchive prepends a row).
+  final ScrollController? scrollController;
   /// Returns the live progress listenable for a downloading track.
   /// Called only for `TrackStatus.downloading` rows.
   final ValueListenable<DownloadProgress?> Function(String trackId)?
@@ -33,9 +37,11 @@ class LibraryScreen extends StatefulWidget {
     required this.onOpenTrack,
     required this.onPlay,
     required this.onArchive,
+    required this.onCancelDownload,
     required this.onArchiveFinished,
     required this.onSearch,
     required this.onOpenArchive,
+    this.scrollController,
     this.downloadProgressFor,
   });
 
@@ -62,6 +68,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
         break;
       case _TrackAction.archive:
         widget.onArchive(t);
+        break;
+      case _TrackAction.cancelDownload:
+        widget.onCancelDownload(t);
         break;
       case null:
         break;
@@ -149,6 +158,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             const SizedBox(height: 8),
             Expanded(
               child: ListView.builder(
+                controller: widget.scrollController,
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
                 itemCount: widget.tracks.length,
                 itemBuilder: (context, i) {
@@ -216,7 +226,7 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-enum _TrackAction { share, summarizeGemini, archive }
+enum _TrackAction { share, summarizeGemini, archive, cancelDownload }
 
 class _TrackActionsSheet extends StatelessWidget {
   final Track track;
@@ -265,11 +275,25 @@ class _TrackActionsSheet extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 4),
-            _ActionRow(
-              icon: Icons.archive_outlined,
-              label: 'Archive',
-              onTap: () => Navigator.of(context).pop(_TrackAction.archive),
-            ),
+            // Archive keeps the cover + metadata and frees the audio — only
+            // meaningful once the audio exists. While downloading or queued
+            // there's no audio yet, so offer an outright cancel that removes
+            // the entry completely instead.
+            if (track.status == TrackStatus.downloading ||
+                track.status == TrackStatus.queued)
+              _ActionRow(
+                icon: Icons.cancel_outlined,
+                label: 'Cancel download',
+                destructive: true,
+                onTap: () =>
+                    Navigator.of(context).pop(_TrackAction.cancelDownload),
+              )
+            else
+              _ActionRow(
+                icon: Icons.archive_outlined,
+                label: 'Archive',
+                onTap: () => Navigator.of(context).pop(_TrackAction.archive),
+              ),
           ],
         ),
       ),
@@ -281,15 +305,17 @@ class _ActionRow extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final bool destructive;
   const _ActionRow({
     required this.icon,
     required this.label,
     required this.onTap,
+    this.destructive = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    const color = AuroraTheme.text;
+    final color = destructive ? const Color(0xFFFF6E80) : AuroraTheme.text;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
