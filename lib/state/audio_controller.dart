@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 
@@ -129,7 +130,7 @@ class AudioController {
     if (t == null) return;
     final cb = _onCompleted;
     if (cb == null) return;
-    final pos = _player.playing ? _player.position : _latestPosition;
+    final pos = _effectivePosition;
     final total = _player.duration ?? Duration(seconds: t.duration);
     if (total <= Duration.zero) return;
     if (pos <= Duration.zero) return;
@@ -152,7 +153,7 @@ class AudioController {
     // Prefer the live extrapolated position while playing; once paused, fall
     // back to the last value positionStream emitted while playing. See
     // [_latestPosition] for why `_player.position` is unreliable on pause.
-    final pos = _player.playing ? _player.position : _latestPosition;
+    final pos = _effectivePosition;
     final total = _player.duration ?? Duration(seconds: t.duration);
     // Don't save the trivial endpoints: 0 means "fresh", end means "done".
     if (pos > const Duration(seconds: 2) && pos < total - const Duration(seconds: 2)) {
@@ -173,18 +174,54 @@ class AudioController {
   /// until live playback position is trustworthy.
   bool get ready => _ready;
 
+  /// The position to report to the UI and persistence. While playing,
+  /// `_player.position` is live and accurate. Once paused, it is unreliable on
+  /// Android — it falls back to the last *broadcast* updatePosition, and the
+  /// Android side does not broadcast on pause, so it typically reads the
+  /// position from when STATE_READY last fired (≈ play start). [_latestPosition]
+  /// holds the last trustworthy position (last positionStream tick while
+  /// playing, kept fresh on every seek), so we report that when paused. See
+  /// [_latestPosition].
+  Duration get _effectivePosition => effectivePosition(
+        playing: _player.playing,
+        playerPosition: _player.position,
+        latestPosition: _latestPosition,
+      );
+
+  /// Pure position-selection rule shared by the UI getters, [_saveNow], and
+  /// [_maybeMarkFinished]. Extracted so the paused-position behavior (the
+  /// media-session-pause regression) is unit-testable without the audio engine.
+  @visibleForTesting
+  static Duration effectivePosition({
+    required bool playing,
+    required Duration playerPosition,
+    required Duration latestPosition,
+  }) =>
+      playing ? playerPosition : latestPosition;
+
+  /// Pure progress-fraction rule, extracted alongside [effectivePosition] so
+  /// the now-playing waveform's value is unit-testable.
+  @visibleForTesting
+  static double progressFraction({
+    required Duration position,
+    required Duration total,
+    required bool completed,
+  }) {
+    if (completed) return 1.0;
+    if (total.inMilliseconds == 0) return 0;
+    return (position.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0);
+  }
+
   /// Fraction 0..1 — based on actual loaded duration when available, otherwise
   /// the metadata duration from the Track. A finished track stays at 1.0 until
   /// the user hits play again, at which point [play] seeks back to zero.
-  double get progress {
-    if (_player.processingState == ProcessingState.completed) return 1.0;
-    final pos = _player.position.inMilliseconds;
-    final total = (_player.duration ?? Duration(seconds: _current?.duration ?? 0)).inMilliseconds;
-    if (total == 0) return 0;
-    return (pos / total).clamp(0.0, 1.0);
-  }
+  double get progress => progressFraction(
+        position: _effectivePosition,
+        total: duration,
+        completed: _player.processingState == ProcessingState.completed,
+      );
 
-  Duration get position => _player.position;
+  Duration get position => _effectivePosition;
   Duration get duration =>
       _player.duration ?? Duration(seconds: _current?.duration ?? 0);
 
@@ -239,6 +276,10 @@ class AudioController {
         final target = Duration(seconds: saved);
         if (target < total - const Duration(seconds: 1)) {
           await _player.seek(target);
+          // Anchor the trustworthy position to the resume point now, so a
+          // paused now-playing view renders it without waiting for the first
+          // positionStream tick.
+          _latestPosition = target;
         }
       }
       _ready = true;
@@ -259,6 +300,7 @@ class AudioController {
     // processingState=completed. Hitting play again should restart from zero.
     if (_player.processingState == ProcessingState.completed) {
       await _player.seek(Duration.zero);
+      _latestPosition = Duration.zero;
     }
     await _player.play();
   }
@@ -270,13 +312,21 @@ class AudioController {
   Future<void> seekFraction(double f) async {
     final total = duration.inMilliseconds;
     if (total == 0) return;
-    await _player.seek(Duration(milliseconds: (f.clamp(0.0, 1.0) * total).round()));
+    final target = Duration(milliseconds: (f.clamp(0.0, 1.0) * total).round());
+    await _player.seek(target);
+    // Keep the trustworthy position current so a seek while paused (e.g.
+    // scrubbing the waveform) is reflected immediately, not only on the next
+    // positionStream tick. See [_latestPosition].
+    _latestPosition = target;
   }
 
   Future<void> seekRelative(Duration delta) async {
-    final next = _player.position + delta;
+    // Base the delta on the trustworthy position, not `_player.position`, which
+    // is stale while paused (see [_latestPosition]).
+    final next = _effectivePosition + delta;
     final clamped = next.isNegative ? Duration.zero : (next > duration ? duration : next);
     await _player.seek(clamped);
+    _latestPosition = clamped;
   }
 
   Future<void> setSpeed(double s) async {
