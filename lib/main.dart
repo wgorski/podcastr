@@ -81,7 +81,7 @@ class _PodcastrHome extends StatefulWidget {
   State<_PodcastrHome> createState() => _PodcastrHomeState();
 }
 
-class _PodcastrHomeState extends State<_PodcastrHome> {
+class _PodcastrHomeState extends State<_PodcastrHome> with WidgetsBindingObserver {
   final _store = LibraryStore();
   final _selection = SelectionStore();
   late final AudioController _audio = AudioController(
@@ -122,9 +122,23 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _requestNotificationPermission();
     _load();
     _wireShareIntent();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // While the screen is off (app backgrounded) Android throttles Flutter's
+    // frame/timer pipeline, so the now-playing position stops repainting and
+    // freezes at the last value painted before the screen went dark — even
+    // though `_audio.position` (read live from the player in build) keeps
+    // advancing with the audio. On resume, force one rebuild so the displayed
+    // time snaps to the true current position immediately, instead of staying
+    // visibly stale until the next throttled positionStream tick lands a second
+    // or two later (the "jumps from 20:18 to 20:25" effect).
+    if (state == AppLifecycleState.resumed && mounted) setState(() {});
   }
 
   Future<void> _requestNotificationPermission() async {
@@ -230,6 +244,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _sleepTicker?.cancel();
     _intentSub?.cancel();
     _downloads.dispose();

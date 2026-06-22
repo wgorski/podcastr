@@ -39,6 +39,14 @@ class AudioController {
   // exactly the regression where pausing from the media-session notification
   // rewound the resume point to "before I started listening".
   Duration _latestPosition = Duration.zero;
+  // Wall-clock instant when `_latestPosition` was last anchored (a playing
+  // positionStream tick, a seek, or play-start). Used to extrapolate the true
+  // position when playback stops: on a real device with the screen off, Android
+  // throttles Flutter's Dart timer so positionStream ticks arrive seconds apart
+  // even though the native foreground service keeps local-file audio advancing
+  // in real time. Without extrapolation we'd freeze (and resume) at the last
+  // sparse tick — several seconds behind where the audio actually reached.
+  DateTime _latestWall = DateTime.fromMillisecondsSinceEpoch(0);
 
   late final StreamSubscription _posSub;
   late final StreamSubscription _stateSub;
@@ -49,11 +57,29 @@ class AudioController {
   })  : _onChanged = onChanged,
         _onCompleted = onCompleted {
     _posSub = _player.positionStream.listen((pos) {
-      _latestPosition = pos;
+      // Position emits are only trustworthy while playing. Paused, just_audio
+      // reports `_player.position`'s stale fallback (≈ play start); we ignore
+      // those and keep our frozen anchor. Paused seeks/skips re-anchor explicitly
+      // (see [seekFraction], [seekRelative], [load]).
+      if (!_player.playing) return;
+      // Reject stale *backward* ticks: just after resuming from pause just_audio
+      // briefly reports the old play-start position (counting up from there,
+      // seconds behind the real audio). Those read as a backward jump versus our
+      // extrapolated anchor, so don't let them pull `_latestPosition` back — the
+      // "drops to 21:00 then climbs" dip. Forward progress re-anchors to the real
+      // player clock (correcting any extrapolation drift). Either way we repaint
+      // and autosave using `_effectivePosition`, which is the (correct) anchor
+      // extrapolation.
+      if (isForwardTick(tickPosition: pos, extrapolated: _effectivePosition)) {
+        _anchorPosition(pos);
+      }
       _onChanged();
       _maybeSavePosition();
     });
     _stateSub = _player.playerStateStream.listen((s) {
+      // Anchor the extrapolation clock at play-start so a freeze that lands
+      // before the first positionStream tick still extrapolates from now.
+      if (s.playing && !_wasPlaying) _latestWall = DateTime.now();
       // When the file finishes, pause but leave the position at the end so
       // the UI keeps the waveform fully filled. Next call to [play] will
       // rewind to zero.
@@ -67,12 +93,35 @@ class AudioController {
         }
       } else if (_wasPlaying && !s.playing) {
         // Real pause: the user (or notification / headset / Bluetooth) stopped
-        // playback. `_saveNow` reads `_latestPosition`, not `_player.position`,
-        // so it captures the pause point even though just_audio does not
-        // refresh updatePosition on pause. Also fire onCompleted if the user
-        // gave up within the final minute — close enough to count as listened.
+        // playback. `_player.position` is already the stale play-start fallback
+        // here, and the last positionStream tick may be seconds old if ticks
+        // were throttled while backgrounded (screen off). Freeze `_latestPosition`
+        // to where local-file audio actually reached by extrapolating the last
+        // tick forward by the elapsed wall time, so `_saveNow` (which reads
+        // `_latestPosition`) persists the true stop point, not a rewound one.
+        // Also fire onCompleted if the user gave up within the final minute —
+        // close enough to count as listened.
+        _latestPosition = frozenPositionAtPause(
+          lastTick: _latestPosition,
+          sinceLastTick: DateTime.now().difference(_latestWall),
+          speed: _speed,
+          total: duration,
+        );
         unawaited(_saveNow());
         _maybeMarkFinished();
+      }
+      // A media-session / Bluetooth *stop* (distinct from pause) — and a
+      // notification dismissal — route through just_audio_background.stop(),
+      // which disposes the platform player and drops the state to idle. The
+      // torn-down player can no longer report position, so a subsequent
+      // fast-path play() would resume audio from the retained point while the
+      // Dart-side position reads ~0: the now-playing waveform snaps to 0:00
+      // even though audio plays from the right spot. Mark the controller
+      // not-ready on that teardown so the now-playing view falls back to the
+      // saved resume point and the next play() re-loads from there (the
+      // `!_ready` branch in [play]), re-establishing a clean position stream.
+      if (playerTornDown(s.processingState, hasCurrent: _current != null)) {
+        _ready = false;
       }
       _wasPlaying = s.playing;
       _onChanged();
@@ -174,30 +223,103 @@ class AudioController {
   /// until live playback position is trustworthy.
   bool get ready => _ready;
 
-  /// The position to report to the UI and persistence. While playing,
-  /// `_player.position` is live and accurate. Once paused, it is unreliable on
-  /// Android — it falls back to the last *broadcast* updatePosition, and the
-  /// Android side does not broadcast on pause, so it typically reads the
-  /// position from when STATE_READY last fired (≈ play start). [_latestPosition]
-  /// holds the last trustworthy position (last positionStream tick while
-  /// playing, kept fresh on every seek), so we report that when paused. See
-  /// [_latestPosition].
-  Duration get _effectivePosition => effectivePosition(
+  /// The position to report to the UI and persistence. We deliberately do NOT
+  /// read `_player.position` directly: on Android it is unreliable across every
+  /// state transition. Paused, it falls back to the last broadcast updatePosition
+  /// (≈ play start). Just after *resuming* from pause it re-anchors on the old
+  /// play-start instant and counts up from there, running seconds behind the real
+  /// audio until just_audio refreshes — the visible "drops to 21:00 then climbs
+  /// back" dip. Instead we extrapolate our own trusted anchor [_latestPosition]
+  /// (set only by forward ticks, seeks, and the pause-freeze) forward by the
+  /// elapsed wall time. Playback is always a local file, so while playing the
+  /// media position advances at real-time × speed and this is exact; forward
+  /// ticks continuously re-anchor it so it never drifts.
+  Duration get _effectivePosition => livePosition(
         playing: _player.playing,
-        playerPosition: _player.position,
         latestPosition: _latestPosition,
+        sinceAnchor: DateTime.now().difference(_latestWall),
+        speed: _speed,
+        total: duration,
       );
 
-  /// Pure position-selection rule shared by the UI getters, [_saveNow], and
-  /// [_maybeMarkFinished]. Extracted so the paused-position behavior (the
-  /// media-session-pause regression) is unit-testable without the audio engine.
+  /// Pure position rule shared by the UI getters, [_saveNow], and
+  /// [_maybeMarkFinished]. While paused, the frozen [latestPosition]. While
+  /// playing, [latestPosition] extrapolated by [sinceAnchor] × [speed], clamped
+  /// to `[0, total]`. Extracted so it is unit-testable without the audio engine.
   @visibleForTesting
-  static Duration effectivePosition({
+  static Duration livePosition({
     required bool playing,
-    required Duration playerPosition,
     required Duration latestPosition,
+    required Duration sinceAnchor,
+    required double speed,
+    required Duration total,
+  }) {
+    if (!playing) return latestPosition;
+    var p = latestPosition + (sinceAnchor.isNegative ? Duration.zero : sinceAnchor) * speed;
+    if (p.isNegative) p = Duration.zero;
+    if (total > Duration.zero && p > total) p = total;
+    return p;
+  }
+
+  /// Whether a positionStream tick should be trusted to re-anchor the position.
+  /// just_audio reports the stale old play-start position for a moment after
+  /// resuming from pause; that reads as a large *backward* jump versus where we
+  /// know we are ([extrapolated]), so reject it. Normal forward progress (and the
+  /// position right after an explicit seek, which re-anchors directly) passes.
+  @visibleForTesting
+  static bool isForwardTick({
+    required Duration tickPosition,
+    required Duration extrapolated,
+    Duration tolerance = const Duration(seconds: 1),
   }) =>
-      playing ? playerPosition : latestPosition;
+      tickPosition + tolerance >= extrapolated;
+
+  /// Set `_latestPosition` and stamp the extrapolation clock together. Every
+  /// place that establishes a trustworthy position (a playing tick, a seek, a
+  /// load/resume) goes through here so [frozenPositionAtPause] always has a
+  /// fresh wall-clock baseline to extrapolate from.
+  void _anchorPosition(Duration pos) {
+    _latestPosition = pos;
+    _latestWall = DateTime.now();
+  }
+
+  /// The position to freeze to when playback stops. Extrapolates the last known
+  /// position ([lastTick], seen [sinceLastTick] ago) forward by the elapsed wall
+  /// time × [speed], clamped to `[0, total]`. Pure so the throttled-tick recovery
+  /// is unit-testable without the audio engine — playback is always a local file,
+  /// so while playing the media position advances at real-time × speed and this
+  /// extrapolation is exact. See [_latestWall].
+  @visibleForTesting
+  static Duration frozenPositionAtPause({
+    required Duration lastTick,
+    required Duration sinceLastTick,
+    required double speed,
+    required Duration total,
+    Duration maxExtrapolation = const Duration(minutes: 2),
+  }) {
+    // Cap how far the wall-clock extrapolation is trusted. Real throttled-tick
+    // gaps are a few seconds, so this is never hit in practice; it's insurance
+    // against a stale anchor fast-forwarding the track to its end (which would
+    // spuriously mark it "finished").
+    var gap = sinceLastTick;
+    if (gap.isNegative) gap = Duration.zero;
+    if (gap > maxExtrapolation) gap = maxExtrapolation;
+    var p = lastTick + gap * speed;
+    if (p.isNegative) p = Duration.zero;
+    if (total > Duration.zero && p > total) p = total;
+    return p;
+  }
+
+  /// Whether a `playerStateStream` event signals that the platform player was
+  /// torn down out from under us — specifically a media-session / Bluetooth
+  /// *stop* (or notification dismissal), which just_audio_background services by
+  /// disposing the platform player and dropping the state to
+  /// [ProcessingState.idle]. Extracted as a pure rule so the readiness reset is
+  /// unit-testable without the audio engine. `hasCurrent` gates out our own
+  /// [stop], which nulls `_current` before the idle event arrives.
+  @visibleForTesting
+  static bool playerTornDown(ProcessingState state, {required bool hasCurrent}) =>
+      state == ProcessingState.idle && hasCurrent;
 
   /// Pure progress-fraction rule, extracted alongside [effectivePosition] so
   /// the now-playing waveform's value is unit-testable.
@@ -236,7 +358,7 @@ class AudioController {
       _maybeMarkFinished();
     }
     _current = t;
-    _latestPosition = Duration.zero;
+    _anchorPosition(Duration.zero);
     _ready = false;
     _wasPlaying = false;
     final path = t.filePath;
@@ -279,7 +401,7 @@ class AudioController {
           // Anchor the trustworthy position to the resume point now, so a
           // paused now-playing view renders it without waiting for the first
           // positionStream tick.
-          _latestPosition = target;
+          _anchorPosition(target);
         }
       }
       _ready = true;
@@ -300,7 +422,7 @@ class AudioController {
     // processingState=completed. Hitting play again should restart from zero.
     if (_player.processingState == ProcessingState.completed) {
       await _player.seek(Duration.zero);
-      _latestPosition = Duration.zero;
+      _anchorPosition(Duration.zero);
     }
     await _player.play();
   }
@@ -315,9 +437,12 @@ class AudioController {
     final target = Duration(milliseconds: (f.clamp(0.0, 1.0) * total).round());
     await _player.seek(target);
     // Keep the trustworthy position current so a seek while paused (e.g.
-    // scrubbing the waveform) is reflected immediately, not only on the next
-    // positionStream tick. See [_latestPosition].
-    _latestPosition = target;
+    // scrubbing the waveform) is reflected immediately. We can't lean on the
+    // next positionStream tick: those are now ignored while paused (the stale
+    // fallback poisons the resume point — see the positionStream listener), so
+    // notify the UI explicitly here. See [_latestPosition].
+    _anchorPosition(target);
+    _onChanged();
   }
 
   Future<void> seekRelative(Duration delta) async {
@@ -326,10 +451,15 @@ class AudioController {
     final next = _effectivePosition + delta;
     final clamped = next.isNegative ? Duration.zero : (next > duration ? duration : next);
     await _player.seek(clamped);
-    _latestPosition = clamped;
+    _anchorPosition(clamped);
+    _onChanged();
   }
 
   Future<void> setSpeed(double s) async {
+    // Re-anchor at the current extrapolated position before changing speed, so
+    // the wall-clock extrapolation continues from here at the new rate rather
+    // than retroactively applying the new speed to time already elapsed.
+    _anchorPosition(_effectivePosition);
     _speed = s;
     await _player.setSpeed(s);
     _onChanged();
@@ -338,7 +468,7 @@ class AudioController {
   Future<void> stop() async {
     await _player.stop();
     _current = null;
-    _latestPosition = Duration.zero;
+    _anchorPosition(Duration.zero);
     _ready = false;
     _onChanged();
   }
