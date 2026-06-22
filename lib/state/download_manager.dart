@@ -57,17 +57,12 @@ class DownloadManager {
   /// internally — googlevideo URLs expire across app restarts).
   Future<void> start(Track track) async {
     if (_active.containsKey(track.id)) return;
-    final sourceUrl = track.sourceUrl;
-    if (sourceUrl == null) {
-      onFailed(track.id, 'No source URL on file for download.');
-      return;
-    }
     final tracksDir = await YoutubeDownloader.tracksDir();
     _active[track.id] = _Tracked(track: track);
     _notifierFor(track.id).value = null;
     await _downloader.enqueue(
       videoId: track.id,
-      sourceUrl: sourceUrl,
+      sourceUrl: track.sourceUrl,
       tracksDir: tracksDir,
       title: track.title,
       channel: track.channel,

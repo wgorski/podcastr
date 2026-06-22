@@ -11,6 +11,7 @@ const seedTracks = <Track>[
     addedAt: 'Today',
     color1: Color(0xFFF0A868),
     color2: Color(0xFFC9622E),
+    sourceUrl: 'https://youtu.be/t1',
   ),
   Track(
     id: 't2',
@@ -21,6 +22,7 @@ const seedTracks = <Track>[
     addedAt: 'Today',
     color1: Color(0xFF6AB7FF),
     color2: Color(0xFF2D6BB8),
+    sourceUrl: 'https://youtu.be/t2',
   ),
   Track(
     id: 't3',
@@ -31,6 +33,7 @@ const seedTracks = <Track>[
     addedAt: 'Yesterday',
     color1: Color(0xFFB794FF),
     color2: Color(0xFF7558C4),
+    sourceUrl: 'https://youtu.be/t3',
   ),
   Track(
     id: 't4',
@@ -41,6 +44,7 @@ const seedTracks = <Track>[
     addedAt: 'Yesterday',
     color1: Color(0xFFFF6B5B),
     color2: Color(0xFFC4382B),
+    sourceUrl: 'https://youtu.be/t4',
   ),
   Track(
     id: 't5',
@@ -51,6 +55,7 @@ const seedTracks = <Track>[
     addedAt: '3 days ago',
     color1: Color(0xFF5EE3D4),
     color2: Color(0xFF2A9D8F),
+    sourceUrl: 'https://youtu.be/t5',
   ),
   Track(
     id: 't6',
@@ -61,6 +66,7 @@ const seedTracks = <Track>[
     addedAt: 'Last week',
     color1: Color(0xFFF5D96C),
     color2: Color(0xFFB89934),
+    sourceUrl: 'https://youtu.be/t6',
   ),
   Track(
     id: 't7',
@@ -71,6 +77,7 @@ const seedTracks = <Track>[
     addedAt: 'Last week',
     color1: Color(0xFFFF8DB2),
     color2: Color(0xFFC25288),
+    sourceUrl: 'https://youtu.be/t7',
   ),
 ];
 
@@ -83,6 +90,7 @@ const downloadPreview = Track(
   addedAt: 'Today',
   color1: Color(0xFFF0A868),
   color2: Color(0xFFC9622E),
+  sourceUrl: 'https://youtu.be/preview',
 );
 
 const downloadSizes = {

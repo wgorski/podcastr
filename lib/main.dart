@@ -341,9 +341,9 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     }
   }
 
-  /// Move a track into the archive. The audio file stays on disk so it can
-  /// still be played from the archive view in the future — only [_permanentlyDeleteTrack]
-  /// removes the file.
+  /// Move a track into the archive. The audio and subtitle files are deleted to
+  /// reclaim storage; the cover thumbnail and all metadata (including the
+  /// resume point) are kept so [_unarchiveTrack] can re-download the audio.
   Future<void> _archiveTrack(Track t) async {
     // An in-flight download has no file yet; abort it and remove the row
     // outright instead of archiving an empty entry.
@@ -359,9 +359,14 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
       return;
     }
     final wasCurrent = _current?.id == t.id;
+    // Reclaim the audio + subtitle bytes; the cover and metadata stay so the
+    // row can be re-downloaded on unarchive. The resume point is kept too.
+    await _store.deleteAudioFor(t);
     final updated = t.copyWith(
       archived: true,
       archivedAtMs: DateTime.now().millisecondsSinceEpoch,
+      clearFilePath: true,
+      clearSubtitle: true,
     );
     final next = [
       for (final x in _tracks) x.id == t.id ? updated : x,
@@ -387,18 +392,31 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
     await _persist();
   }
 
-  /// Restore an archived track to the library. The file is already on disk,
-  /// so this is a one-field flip plus a persist.
-  void _unarchiveTrack(Track t) {
+  /// Restore an archived track to the library and re-download its audio,
+  /// reusing the normal download pipeline. The row reappears in the library
+  /// immediately showing download progress; a failed re-download surfaces as a
+  /// failed row with the standard Retry action.
+  Future<void> _unarchiveTrack(Track t) async {
     if (!t.archived) return;
-    final restored = t.copyWith(archived: false);
+    final restored = t.copyWith(
+      archived: false,
+      status: TrackStatus.downloading,
+      clearErrorMessage: true,
+    );
+    // See _onStartDownload re: start-future-then-setState ordering, so a card
+    // built before start() returns subscribes to a live progress notifier.
+    final f = _downloads.start(restored);
     setState(() {
       _tracks = [
         for (final x in _tracks) x.id == t.id ? restored : x,
       ];
       if (_viewedTrack?.id == t.id) _viewedTrack = restored;
+      // Surface the re-download in the library so the user sees its progress
+      // rather than staying on the archive view it just left.
+      if (_screen == _Screen.archive) _screen = _Screen.library;
     });
-    _persist();
+    await _persist();
+    await f;
   }
 
   /// Remove a track from the archive: deletes the persisted row, drops the
@@ -430,7 +448,7 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
       }
     }
     await _audio.forget(t.id);
-    await _store.deleteFileFor(t);
+    await _store.deleteFileFor(t, tracksDir: await YoutubeDownloader.tracksDir());
     await _persist();
   }
 
@@ -532,7 +550,6 @@ class _PodcastrHomeState extends State<_PodcastrHome> {
   }
 
   Future<void> _retryDownload(Track failed) async {
-    if (failed.sourceUrl == null) return;
     final downloading = failed.copyWith(
       status: TrackStatus.downloading,
       clearErrorMessage: true,

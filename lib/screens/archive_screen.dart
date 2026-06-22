@@ -6,8 +6,10 @@ import '../widgets/thumbnail.dart';
 
 /// Read-only list of archived tracks, sorted by archive time (newest first;
 /// falls back to download time for rows archived before that was tracked).
-/// Long-press a row to act on it: Unarchive (return it to the library), Share
-/// (the original URL), or Delete (permanent — only available here per the spec).
+/// Archiving frees the audio file but keeps the cover and metadata. Long-press
+/// a row to act on it: Unarchive (return it to the library and re-download the
+/// audio), Share (the original URL), or Delete (permanent — only here per the
+/// spec).
 class ArchiveScreen extends StatelessWidget {
   final List<Track> tracks;
   final VoidCallback onClose;
@@ -352,7 +354,7 @@ class _EmptyArchive extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Long-press a track and choose "Archive" to move it out of the library without deleting the file.',
+              'Long-press a track and choose "Archive" to free its audio while keeping the cover and details. Unarchiving re-downloads it.',
               style: AuroraTheme.body(size: 13, color: AuroraTheme.muted, height: 1.45),
               textAlign: TextAlign.center,
             ),

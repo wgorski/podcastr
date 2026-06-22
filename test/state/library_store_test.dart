@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -19,6 +20,7 @@ Track _track(String id) => Track(
       color2: const Color(0xFFAABBCC),
       filePath: '/tmp/$id.m4a',
       thumbnailPath: '/tmp/$id.jpg',
+      sourceUrl: 'https://youtu.be/$id',
     );
 
 void main() {
@@ -104,6 +106,7 @@ void main() {
         addedAt: '',
         color1: Color(0xFF000000),
         color2: Color(0xFF000000),
+        sourceUrl: 'https://youtu.be/no-file',
       );
       // Should complete without throwing.
       await LibraryStore().deleteFileFor(t);
@@ -114,6 +117,78 @@ void main() {
         filePath: '/tmp/podcastr-test-definitely-not-a-real-file.m4a',
       );
       await LibraryStore().deleteFileFor(t);
+    });
+
+    test('sweeps stray <id>.* audio/subtitle even when paths are nulled',
+        () async {
+      // Mirrors permanently deleting an archived track: filePath/subtitlePath
+      // were cleared on archive, but the bytes (or a partial re-download) may
+      // still be on disk.
+      final dir = await Directory.systemTemp.createTemp('podcastr-purge-test');
+      const id = 'vid42';
+      final audio = File('${dir.path}/$id.mp4')..writeAsStringSync('audio');
+      final subs = File('${dir.path}/$id.vtt')..writeAsStringSync('WEBVTT');
+      final thumb = File('${dir.path}/$id.jpg')..writeAsStringSync('jpeg');
+      // A neighbouring track whose id merely starts the same must survive.
+      final other = File('${dir.path}/${id}9.mp4')..writeAsStringSync('keep');
+
+      final archived = _track(id).copyWith(
+        thumbnailPath: thumb.path,
+        clearFilePath: true,
+        clearSubtitle: true,
+        archived: true,
+      );
+      expect(archived.filePath, isNull);
+      expect(archived.subtitlePath, isNull);
+
+      await LibraryStore().deleteFileFor(archived);
+
+      expect(audio.existsSync(), isFalse);
+      expect(subs.existsSync(), isFalse);
+      expect(thumb.existsSync(), isFalse);
+      expect(other.existsSync(), isTrue,
+          reason: 'prefix match must respect the trailing dot');
+
+      await dir.delete(recursive: true);
+    });
+  });
+
+  group('LibraryStore.deleteAudioFor', () {
+    test('deletes the audio + subtitle files but keeps the thumbnail',
+        () async {
+      final dir = await Directory.systemTemp.createTemp('podcastr-archive-test');
+      final audio = File('${dir.path}/clip.m4a')..writeAsStringSync('audio');
+      final subs = File('${dir.path}/clip.vtt')..writeAsStringSync('WEBVTT');
+      final thumb = File('${dir.path}/clip.jpg')..writeAsStringSync('jpeg');
+
+      final t = _track('clip').copyWith(
+        filePath: audio.path,
+        subtitlePath: subs.path,
+        thumbnailPath: thumb.path,
+      );
+
+      await LibraryStore().deleteAudioFor(t);
+
+      expect(audio.existsSync(), isFalse);
+      expect(subs.existsSync(), isFalse);
+      expect(thumb.existsSync(), isTrue, reason: 'cover must survive archiving');
+
+      await dir.delete(recursive: true);
+    });
+
+    test('is a no-op when paths are null', () async {
+      const t = Track(
+        id: 'no-file',
+        title: '',
+        channel: '',
+        duration: 0,
+        size: '',
+        addedAt: '',
+        color1: Color(0xFF000000),
+        color2: Color(0xFF000000),
+        sourceUrl: 'https://youtu.be/no-file',
+      );
+      await LibraryStore().deleteAudioFor(t);
     });
   });
 }

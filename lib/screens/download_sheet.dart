@@ -398,6 +398,7 @@ class _PreviewArt extends StatelessWidget {
       addedAt: '',
       color1: palette.c1,
       color2: palette.c2,
+      sourceUrl: 'https://youtu.be/$videoId',
     );
     return SquareArt(track: pseudoTrack, size: 48, radius: 10);
   }
